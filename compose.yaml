@@ -1,0 +1,18 @@
+services:
+  council:
+    build: .
+    ports:
+      - "127.0.0.1:4310:4310"
+    environment:
+      DEPLOYMENT_MODE: hosted
+      APP_ORIGIN: ${APP_ORIGIN:?Set your HTTPS origin}
+      COUNCIL_ENCRYPTION_KEY: ${COUNCIL_ENCRYPTION_KEY:?Set a 64-hex encryption key}
+      COOKIE_SECURE: "true"
+      TRUST_PROXY: "1"
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+      INVITE_CODE: ${INVITE_CODE:-}
+    volumes:
+      - council-data:/data
+    restart: unless-stopped
+volumes:
+  council-data:

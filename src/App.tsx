@@ -2469,7 +2469,7 @@ function CliModal({ close }: { close: () => void }) {
       <h3>Connect a coding project</h3>
       <pre>
         {
-          "npm run cli -- coding-worker --provider CONNECTION_ID\n  --url http://127.0.0.1:4096 --directory /your/project"
+          "npm run cli -- coding-worker --provider CONNECTION_ID --url http://127.0.0.1:4096 --directory /your/project"
         }
       </pre>
       <p className="field-help">
@@ -2480,7 +2480,7 @@ function CliModal({ close }: { close: () => void }) {
       <h3>Open the full native coding interface</h3>
       <pre>
         {
-          "npm run cli -- code --url http://127.0.0.1:4096\n  --directory /your/project --session SESSION_ID"
+          "npm run cli -- code --url http://127.0.0.1:4096 --directory /your/project --session SESSION_ID"
         }
       </pre>
     </Modal>

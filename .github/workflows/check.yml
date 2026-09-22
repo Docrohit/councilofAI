@@ -20,6 +20,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: python3 scripts/verify-tui.py
       - run: docker pull node:22-bookworm-slim && node scripts/verify-sandbox.mjs
       - run: node --import tsx scripts/verify-council-sandbox.mjs
       - run: npm run build
@@ -28,7 +29,7 @@ jobs:
       - run: npm run test:e2e
       - name: Package verified release
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: tar -czf council-release.tar.gz dist server shared cli deploy package.json package-lock.json
+        run: tar -czf council-release.tar.gz dist server shared cli bin deploy package.json package-lock.json
       - uses: actions/upload-artifact@v4
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:

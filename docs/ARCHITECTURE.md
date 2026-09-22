@@ -91,3 +91,24 @@ active council. Broker sessions are ephemeral, never part of SQLite backups.
 See [Coding](CODING.md) for exact resource limits, expiration, export restrictions
 and the remaining gaps with a native OpenCode workspace. Real Docker integration
 checks run in CI before deployment; they are separate from model benchmarks.
+
+## Standalone native runtime
+
+`bin/council.mjs` resolves Council's own TypeScript runtime from the installation,
+so `council` can launch in any project directory. `cli/native.ts` owns a local
+Store and Orchestrator with a per-project SQLite history, encrypted provider
+keys and process lock. `cli/project.ts` implements the injected ProjectRuntime
+interface for real file/search/patch/diff/command operations. No HTTP account
+or OpenCode process participates. `cli/tui.ts` provides terminal views, model
+selection, approval prompts, session replay/resume and a small built-in editor.
+
+The same orchestration engine retains board/direct conversations, evidence and
+adaptive delegation. Project operations serialize across peers, and edits use
+content hashes. The web server does not instantiate LocalProject: its hosted
+tools continue to use the restricted Docker broker. This prevents a native CLI
+feature from silently enabling arbitrary application-host file access.
+
+Native config/history and hosted accounts are separate. The OpenCode adapter
+remains an optional compatibility path; its own capabilities are not evidence
+of native Council parity. See [native operation](NATIVE.md) and the
+[capability table](CODING.md#capability-status).

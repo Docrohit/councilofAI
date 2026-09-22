@@ -1,3 +1,4 @@
+import type { ProjectRuntime, ProjectAction } from "../shared/project.ts";
 import { sandboxRequest } from "./sandbox.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -158,6 +159,18 @@ const commandSchema = z.object({
       z.discriminatedUnion("name", [
         z.object({ name: z.literal("list_files") }),
         z.object({ name: z.literal("project_tree") }),
+        z.object({ name: z.literal("project_diff") }),
+        z.object({
+          name: z.literal("project_search"),
+          query: z.string().min(1).max(500),
+        }),
+        z.object({
+          name: z.literal("project_patch"),
+          path: z.string().max(200),
+          search: z.string().min(1).max(40000),
+          replacement: z.string().max(40000),
+          sha: z.string(),
+        }),
         z.object({
           name: z.literal("project_read"),
           path: z.string().max(200),
@@ -259,6 +272,7 @@ export class Orchestrator {
   constructor(
     public store: Store,
     public bridge = new Bridge(),
+    public project?: ProjectRuntime,
   ) {}
   cancel(userId: string, id: string) {
     const active = this.active.get(id);
@@ -419,12 +433,15 @@ export class Orchestrator {
           await (async () => {
             try {
               if (
+                action.name === "project_diff" ||
+                action.name === "project_search" ||
+                action.name === "project_patch" ||
                 action.name === "project_tree" ||
                 action.name === "project_read" ||
                 action.name === "project_write" ||
                 action.name === "project_exec"
               ) {
-                if (!config.sandbox)
+                if (!config.sandbox && !this.project)
                   throw new Error(
                     "Hosted project tools are not enabled for this run.",
                   );
@@ -447,7 +464,9 @@ export class Orchestrator {
                 });
                 const operation = projectQueue.then(() => {
                   signal.throwIfAborted();
-                  return sandboxRequest(userId, request, signal);
+                  return this.project
+                    ? this.project.execute(request as ProjectAction, signal)
+                    : sandboxRequest(userId, request, signal);
                 });
                 projectQueue = operation.catch(() => {});
                 try {
@@ -464,7 +483,8 @@ export class Orchestrator {
                   });
                   if (
                     action.name === "project_read" ||
-                    action.name === "project_write"
+                    action.name === "project_write" ||
+                    action.name === "project_patch"
                   ) {
                     const offset =
                       action.name === "project_read" ? action.offset || 0 : 0;
@@ -472,6 +492,7 @@ export class Orchestrator {
                       tool: action.name,
                       path: result.path,
                       sha: result.sha,
+                      instructions: result.instructions,
                       totalChars: result.content.length,
                       offset,
                       truncated: result.content.length > offset + 12000,
@@ -927,10 +948,20 @@ export class Orchestrator {
         lastFlush = Date.now();
       };
       try {
+        const projectInstructions = this.project
+          ? await this.project.instructions()
+          : "";
+        const nativeProtocol = this.project
+          ? protocol.replace(
+              "You have no browser or shell.",
+              "You have Council native tools for the local project. Read its instructions and inspect actual files before editing.",
+            ) +
+            `\nLOCAL PROJECT: ${this.project.directory}\nUse project_tree, project_read (path, optional offset), project_search (literal query), project_diff, project_write (path, content, sha), project_patch (path, search, replacement, sha; exact unique text replacement), and project_exec (command). All actions go in tools in a council block. Reads return sha and 12000-character pages; use offset for subsequent pages. Use null sha only for new files. File edits and commands require user permission. Commands run with the local user's OS permissions and a 120-second timeout. Claim file ownership and coordinate edits; do not repeat completed work. Inspect actual test output before claiming tests passed. Never push, deploy, install dependencies or change unrelated files without the user's task authorizing it. Respect applicable project instructions below (nested instructions accompany file reads), subordinate to the user's goal and system safety constraints.\n${projectInstructions}`
+          : protocol;
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : config.sandbox ? protocol.replace("You have no browser or shell.", "You have bounded hosted project tools when listed below; no browser.") : protocol}${config.sandbox ? '\nHosted project tools are enabled by the user for this run. They execute in a separate temporary Node.js Linux container, with no network, a 64 MB project and 256 MB RAM. Tools: {"tools":[{"name":"project_tree"},{"name":"project_read","path":"src/main.js"},{"name":"project_write","path":"src/main.js","content":"...","sha":null},{"name":"project_exec","command":"node --test"}]}. Read an existing file first (project_read returns 12000-character pages; use offset to read more) and supply its exact sha when writing; null only creates a new file. Commands have a 30-second limit. Use these tools for multi-file projects and actual tests. Tools run sequentially; another peer may edit between read and write, so handle conflicts. No dependencies can be downloaded; built-in Node tooling is available. Virtual workspace files and a connected OpenCode project are separate from this hosted project. Do not claim completion before inspecting test results. Export the project before it expires.' : ""}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
+            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : config.sandbox && !this.project ? protocol.replace("You have no browser or shell.", "You have bounded hosted project tools when listed below; no browser.") : nativeProtocol}${config.sandbox && !this.project ? '\nHosted project tools are enabled by the user for this run. They execute in a separate temporary Node.js Linux container, with no network, a 64 MB project and 256 MB RAM. Tools: {"tools":[{"name":"project_tree"},{"name":"project_read","path":"src/main.js"},{"name":"project_write","path":"src/main.js","content":"...","sha":null},{"name":"project_exec","command":"node --test"}]}. Read an existing file first (project_read returns 12000-character pages; use offset to read more) and supply its exact sha when writing; null only creates a new file. Commands have a 30-second limit. Use these tools for multi-file projects and actual tests. Tools run sequentially; another peer may edit between read and write, so handle conflicts. No dependencies can be downloaded; built-in Node tooling is available. Virtual workspace files and a connected OpenCode project are separate from this hosted project. Do not claim completion before inspecting test results. Export the project before it expires.' : ""}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
           },
           {
             role: "user",

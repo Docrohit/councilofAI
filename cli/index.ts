@@ -28,6 +28,13 @@ const { values, positionals } = parseArgs({
     "max-agents": { type: "string" },
     "max-depth": { type: "string" },
     "max-calls": { type: "string" },
+    version: { type: "boolean" },
+    name: { type: "string" },
+    kind: { type: "string" },
+    model: { type: "string" },
+    "key-env": { type: "string" },
+    "allow-write": { type: "boolean" },
+    "allow-exec": { type: "boolean" },
     help: { type: "boolean", short: "h" },
   },
 });
@@ -44,15 +51,6 @@ const base = (
   saved.server ||
   "http://localhost:4310"
 ).replace(/\/$/, "");
-const parsed = new URL(base);
-if (
-  parsed.protocol !== "https:" &&
-  !(
-    parsed.protocol === "http:" &&
-    ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
-  )
-)
-  throw new Error("Use HTTPS for a remote Council server.");
 let token = process.env.COUNCIL_TOKEN || saved.token || "";
 async function api<T = any>(
   endpoint: string,
@@ -311,12 +309,146 @@ async function worker(coding = false) {
 }
 async function main() {
   const command = positionals[0];
-  if (!command || values.help) {
+  if (values.version || command === "version") {
     console.log(
-      `Council CLI\n\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  code --url URL --directory /project [--session SESSION_ID]\n                                    Open the full native OpenCode terminal UI\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nCreate your account and model connections in the web app first.`,
+      JSON.parse(
+        readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+      ).version,
     );
     return;
   }
+  if (values.help) {
+    console.log(
+      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
+    );
+    return;
+  }
+  if (!command || command === "tui" || command === "code") {
+    if (values.url)
+      throw new Error(
+        "Council code is now standalone. Use the optional opencode command to attach an external OpenCode runtime.",
+      );
+    process.env.DEPLOYMENT_MODE = "local";
+    const { startTui } = await import("./tui.ts");
+    await startTui({
+      directory: values.directory || process.cwd(),
+      agents: values.agents ? Number(values.agents) : undefined,
+      ids: values.providers?.split(","),
+      maxCalls: values["max-calls"] ? Number(values["max-calls"]) : undefined,
+      concurrency: values.concurrency ? Number(values.concurrency) : undefined,
+      maxAgents:
+        values["max-agents"] === "unlimited"
+          ? null
+          : values["max-agents"]
+            ? Number(values["max-agents"])
+            : undefined,
+      maxDepth:
+        values["max-depth"] === "unlimited"
+          ? null
+          : values["max-depth"]
+            ? Number(values["max-depth"])
+            : undefined,
+      prompt: positionals.slice(1).join(" ") || undefined,
+    });
+    return;
+  }
+  if (command === "models") {
+    const { loadModels, saveModel, removeModel, nativeDefaults } =
+      await import("./native.ts");
+    if (positionals[1] === "add") {
+      const kind = values.kind || "openai",
+        defaults = nativeDefaults[kind];
+      if (!defaults || !values.name || !values.model)
+        throw new Error(
+          "Use models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME].",
+        );
+      const m = saveModel({
+        id: values.name,
+        kind,
+        model: values.model,
+        baseUrl: values.url || defaults.url,
+        keyEnv: values["key-env"] || defaults.keyEnv,
+      });
+      console.log(
+        `Saved ${m.id}: ${m.model}${m.keyEnv ? `. Export ${m.keyEnv} before launching Council.` : ""}`,
+      );
+    } else if (positionals[1] === "remove") {
+      if (!positionals[2]) throw new Error("Provide a model connection ID.");
+      removeModel(positionals[2]);
+    } else
+      for (const m of loadModels())
+        console.log(
+          `${m.id}  ${m.kind}  ${m.model}  ${m.baseUrl}  key: ${m.keyEnv || "none"}`,
+        );
+    return;
+  }
+  if (command === "local-run") {
+    process.env.DEPLOYMENT_MODE = "local";
+    const { NativeCouncil } = await import("./native.ts");
+    const { cleanTerminal } = await import("./tui.ts");
+    const council = new NativeCouncil(
+      values.directory || process.cwd(),
+      async (request) =>
+        request.kind === "write"
+          ? !!values["allow-write"]
+          : !!values["allow-exec"],
+    );
+    const cancel = () => council.stop();
+    process.on("SIGINT", cancel);
+    process.on("SIGTERM", cancel);
+    try {
+      const config = council.config(
+        values.providers?.split(","),
+        Number(values.agents || 3),
+      );
+      if (values["max-calls"]) config.maxCalls = Number(values["max-calls"]);
+      if (values.concurrency) config.concurrency = Number(values.concurrency);
+      if (values["max-agents"])
+        config.maxAgents =
+          values["max-agents"] === "unlimited"
+            ? null
+            : Number(values["max-agents"]);
+      if (values["max-depth"])
+        config.maxDepth =
+          values["max-depth"] === "unlimited"
+            ? null
+            : Number(values["max-depth"]);
+      const run = await council.run(
+        positionals.slice(1).join(" "),
+        config,
+        (event) => {
+          const d = event.data;
+          if (event.type === "turn.start")
+            console.log(`\n[${cleanTerminal(d.name)}]`);
+          if (event.type === "turn.delta")
+            process.stdout.write(cleanTerminal(d.text));
+          if (event.type === "coding.activity")
+            console.log(
+              `\n[${cleanTerminal(d.title)} · ${d.status}] ${cleanTerminal(d.detail)}`,
+            );
+          if (event.type === "run.final")
+            console.log("\nCOUNCIL CONCLUSION\n" + cleanTerminal(d.text));
+        },
+      );
+      console.log(`\nSession ${run.id}: ${run.status}`);
+      if (run.status !== "completed") process.exitCode = 1;
+    } finally {
+      process.off("SIGINT", cancel);
+      process.off("SIGTERM", cancel);
+      await council.close();
+    }
+    return;
+  }
+  const parsed = new URL(base);
+  if (
+    parsed.protocol !== "https:" &&
+    !(
+      parsed.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
+    )
+  )
+    throw new Error("Use HTTPS for a remote Council server.");
+
   if (command === "login") {
     const rl = createInterface({
       input: process.stdin,
@@ -348,9 +480,9 @@ async function main() {
     console.log(`Signed in to ${base}. Token saved to ${configFile}`);
     return;
   }
-  if (command === "code") {
+  if (command === "opencode") {
     if (!values.url || !values.directory)
-      throw new Error("code requires --url and --directory");
+      throw new Error("opencode requires --url and --directory");
     const runtime = new OpenCodeWorker({
       url: values.url,
       directory: values.directory,

@@ -8,7 +8,29 @@ Council is a personal, self-hostable multi-LLM orchestration project with a mobi
 
 > Working alpha. Includes a clearly labelled scripted demo. Real model adapters are implemented and tested against protocol fixtures; this checkout has not yet been validated with live paid API models or a downloaded local model. Council is an independent project, not affiliated with OpenCode.
 
-## Start locally
+## Standalone coding CLI / TUI
+
+Council includes its **own terminal UI, editor and local project runtime**. No
+OpenCode installation, Council web server or account is required for this mode.
+Use an existing repository or any directory of project files.
+
+```sh
+git clone https://github.com/Docrohit/councilofAI.git
+cd councilofAI
+npm ci
+npm link
+council models add --name local --kind ollama --model YOUR_INSTALLED_MODEL
+cd /absolute/path/to/your/project
+council --providers local --agents 5
+```
+
+Requires Node.js 22.18+. Use `/connect` and `/use` for mixed local/cloud models,
+`/files`, `/edit`, `/diff` and `/shell` for project work, and `/history` or
+`/resume` for saved sessions. Agents request permission before editing files or
+running commands. See [native setup and upgrades](docs/NATIVE.md).
+**Full OpenCode parity is still unfinished**; see the [capability table](docs/CODING.md#capability-status).
+
+## Start the web app locally
 
 Requires **Node.js 22.18+** (Node 24 LTS recommended).
 
@@ -33,7 +55,10 @@ The project uses React, TypeScript, Express, SQLite, and server-sent events. Its
 
 ## Code with real project tools
 
-Connect an **OpenCode coding runtime** from Connections, then launch `npm run cli -- coding-worker --provider CONNECTION_ID --url http://127.0.0.1:4096 --directory /your/project`. Peers use the actual OpenCode engine for files, shell commands and tests; Council streams tool results and asks for permissions in the discussion. Use `npm run cli -- code --url http://127.0.0.1:4096 --directory /your/project` for the full native terminal UI. See [Coding setup and current parity](docs/CODING.md) for model configuration, permissions, budgets and the RunPod handoff.
+Use `council` from the project directory for native multi-file coding, shell
+commands and tests. The web **Coding project** offers a temporary isolated Node
+workspace. The optional OpenCode adapter remains for existing installations;
+it is not required by Council's own runtime. See [coding capabilities](docs/CODING.md).
 
 ## Model count and agent count are separate
 
@@ -113,7 +138,7 @@ The worker makes outbound authenticated requests and forwards streamed output. O
 
 **Privacy:** bridging a local model to a hosted Council sends the task, public outputs, and any provider-exposed reasoning through the hosted server. For fully local processing and storage, run both Council and the model locally.
 
-## Developer CLI
+## Hosted-account CLI
 
 ```sh
 npm run cli -- login --server http://localhost:4310
@@ -130,19 +155,25 @@ npm run cli -- stop RUN_ID
 npm run cli -- logout
 ```
 
-Tokens last 30 days, are hashed on the server, and are stored with mode `0600` under `~/.config/council/config.json`. `COUNCIL_SERVER` and `COUNCIL_TOKEN` override saved settings. The web app’s Developer CLI dialog can create or revoke tokens. CLI output shows the action protocol as well as public text; it is a streaming CLI, not a full OpenCode terminal UI.
+Tokens last 30 days, are hashed on the server, and are stored with mode `0600` under `~/.config/council/config.json`. `COUNCIL_SERVER` and `COUNCIL_TOKEN` override saved settings. The web app’s Developer CLI dialog can create or revoke tokens. These hosted commands stream activity; use plain `council` for the standalone terminal UI. Native connections and sessions are separate from your hosted account.
 
 ## Workspace tools
 
 Agents can list/read the account’s virtual text files and propose changes. Proposed writes show the original and proposed content for review. Accepting checks the original version to prevent stale overwrites. Files belong to a Council account and are stored in SQLite; they are not arbitrary files on the server or visitor’s computer.
 
-For real projects, the optional **OpenCode worker** executes native coding tools on the connected project computer. It exposes tool activity, permission requests, questions and available diffs in Council. The web process does not execute project code directly. The hosted Coding project runs Node.js files and commands in a separate, bounded Docker container through a restricted broker. Native LSP/MCP/plugins require normal OpenCode configuration. The full native TUI is available through the CLI; Council now includes a text editor, file tree, noninteractive command terminal and ephemeral hosted sandbox. Interactive PTY, LSP, native undo/revert and broader hosted environments remain unfinished. See [Coding](docs/CODING.md).
+For real repositories, the standalone Council CLI/TUI executes its own file and
+command tools in the selected directory. Its text editor includes save, undo and
+redo. The hosted Coding project uses an isolated temporary Docker container with
+a file tree, editor and noninteractive command console. Persistent web repositories,
+embedded PTY, native LSP/MCP and advanced rollback remain unfinished. The OpenCode
+adapter is optional. See [Coding](docs/CODING.md) for exact limits.
 
 ## Verification
 
 ```sh
 npm run check
 npm test
+python3 scripts/verify-tui.py
 npx playwright install chromium
 npm run test:e2e
 npm run build
@@ -169,4 +200,4 @@ Use the editor and command terminal to inspect the result. Export your project:
 these workspaces expire after 30 minutes idle, two hours total, or a broker
 restart. They have no network, a 64 MB project, 256 MB memory, and 30-second
 commands. For dependency installation, larger projects and full native coding
-tools, connect an OpenCode worker. Details: [Coding](docs/CODING.md).
+tools, use standalone Council in your local or server project directory. Details: [Coding](docs/CODING.md).

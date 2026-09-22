@@ -1,6 +1,6 @@
 {
   "name": "council-harness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "A personal multi-model agent council with a web workspace and developer CLI",
@@ -15,7 +15,8 @@
     "test:e2e": "playwright test",
     "check": "tsc --noEmit",
     "cli": "tsx cli/index.ts",
-    "import:gsm8k": "tsx scripts/import-gsm8k.ts"
+    "import:gsm8k": "tsx scripts/import-gsm8k.ts",
+    "tui": "tsx cli/index.ts tui"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
@@ -40,5 +41,8 @@
     "prettier": "^3.9.8",
     "typescript": "^5.9.3",
     "vite": "^7.3.1"
+  },
+  "bin": {
+    "council": "bin/council.mjs"
   }
 }

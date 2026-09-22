@@ -455,7 +455,7 @@ function CodingCard({
         </span>
       </summary>
       <pre>{d.detail}</pre>
-      <span className="field-help">OpenCode session {d.sessionId}</span>
+      <span className="field-help">Coding session {d.sessionId}</span>
       {pending &&
         (answered || sent ? (
           <p>Response sent.</p>
@@ -2450,9 +2450,22 @@ function CliModal({ close }: { close: () => void }) {
   return (
     <Modal title="Developer CLI" close={close}>
       <p className="modal-intro">
-        The CLI uses the same account, sessions, and live peer discussion as the
-        web app.
+        Council has its own standalone terminal interface and project tools. No
+        OpenCode installation or web account is required for local use.
       </p>
+      <h3>Standalone Council</h3>
+      <pre>
+        {
+          "# In the Council checkout, once:\nnpm ci\nnpm link\n\n# In any project directory:\ncouncil"
+        }
+      </pre>
+      <p className="field-help">
+        Use /connect to add a model, /agents to choose team size, /files to
+        browse, and /edit to open Council’s editor. Models connect directly
+        through Ollama, vLLM or API credentials from your environment. Local
+        sessions stay on that computer.
+      </p>
+      <h3>Optional hosted account access</h3>
       <pre>
         npm run cli -- login --server {location.origin}
         {"\n"}npm run cli -- connections{"\n"}npm run cli -- run "Your goal"
@@ -2509,7 +2522,7 @@ function CliModal({ close }: { close: () => void }) {
         Create a bridge connection first. The worker reaches your local model
         and forwards its stream to your private session.
       </p>
-      <h3>Connect a coding project</h3>
+      <h3>Optional OpenCode compatibility</h3>
       <pre>
         {
           "npm run cli -- coding-worker --provider CONNECTION_ID --url http://127.0.0.1:4096 --directory /your/project"
@@ -2520,10 +2533,10 @@ function CliModal({ close }: { close: () => void }) {
         project first. Native tool activity and permission requests appear in
         your Council discussion. Model credentials stay in OpenCode.
       </p>
-      <h3>Open the full native coding interface</h3>
+      <h3>Attach an existing OpenCode session (optional)</h3>
       <pre>
         {
-          "npm run cli -- code --url http://127.0.0.1:4096 --directory /your/project --session SESSION_ID"
+          "npm run cli -- opencode --url http://127.0.0.1:4096 --directory /your/project --session SESSION_ID"
         }
       </pre>
     </Modal>

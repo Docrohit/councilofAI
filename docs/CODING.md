@@ -1,11 +1,37 @@
 # Coding with a Council
 
-Coding is the primary product direction. Council adds a shared goal, peer messages,
-work ownership, evidence, challenges and adaptive delegation to an **actual
-OpenCode coding runtime**. It does not approximate shell execution with proposed
-text files.
+Council is a standalone coding harness. Its own terminal UI and local project
+runtime work without OpenCode. The web app also has a bounded hosted workspace.
+An optional OpenCode adapter remains available for existing users.
 
-## Connect a project
+Start with [standalone installation, models, sessions and editing](NATIVE.md).
+Run `council` inside a repository or ordinary project directory: it can use many
+files, nested folders and project instructions, rather than a single upload.
+
+## Capability status
+
+| Capability                                                      | Native Council today                                            | Remaining work                                                          |
+| --------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Model/API selection, mixed local/cloud, independent agent count | Native CLI/TUI and web                                          | Provider discovery, OAuth and broader model-specific validation         |
+| Board, direct peer conversations, evidence/disputes, delegation | Same Council engine in native and web                           | Real-model quality and scale evaluations                                |
+| Files, search, edits, patches, commands and tests               | Native project tools with approvals                             | Richer navigation, semantic search and rollback                         |
+| Terminal UI                                                     | Own TUI, no OpenCode executable                                 | Mouse, richer layouts and command palette                               |
+| Editor                                                          | Own text editor with save/undo/redo; optional external editor   | Syntax intelligence, LSP and advanced diffs                             |
+| Terminal                                                        | Approved commands and a handoff to an interactive local shell   | Embedded web PTY and managed long-running processes                     |
+| Sessions and recovery                                           | Local project history and checkpoint continuation; web sessions | Session branching, selective rewind, export/share and cross-client sync |
+| Usage                                                           | Calls and provider-reported tokens                              | Reliable cost accounting and spend enforcement                          |
+| Real multi-file web coding                                      | Temporary isolated Node workspace                               | Persistent Git repositories and native local-project web bridge         |
+| LSP, MCP, plugins, skills, formatters                           | Can invoke installed tools through approved commands            | First-class native integrations                                         |
+| Git projects                                                    | Open existing directories; inspect diffs; approved Git commands | Managed worktrees, conflict UI and review/revert workflow               |
+| General work                                                    | Text files plus approved installed command-line tools           | Built-in browser/research and document extraction                       |
+| OpenCode compatibility                                          | Optional adapter documented below                               | Never required by native Council                                        |
+
+**Full OpenCode parity is unfinished.** This table tracks actual native features;
+OpenCode's own features are not counted as implemented Council features. The
+0.2 foundation has fixture-verified project execution and a real terminal-editor
+smoke test. It does not establish math/coding benchmark superiority.
+
+## Optional: connect an existing OpenCode project
 
 Use an existing OpenCode installation on the computer containing your project.
 The worker was exercised with **OpenCode 1.18.31**; source/API review is pinned to
@@ -77,14 +103,14 @@ cancellation inside a separately running OpenCode process; inspect/abort that
 native session before restarting. Changes already made to files are not rolled
 back by cancelling a run.
 
-## Full native interface
+## Optional OpenCode interface
 
 Use the installed OpenCode terminal interface for its native project navigation,
 commands, session history, editor integration, LSP/MCP configuration and recovery
 features:
 
 ```sh
-npm run cli -- code --url http://127.0.0.1:4096 \
+npm run cli -- opencode --url http://127.0.0.1:4096 \
   --directory /absolute/path/to/project --session SESSION_ID
 ```
 
@@ -108,24 +134,6 @@ OpenCode configuration and dependencies. They are not installed or configured
 by connecting a worker. Native subagents stay native; use Council delegation
 when a specialist must participate in Council's peer ledger and budgets.
 
-| Capability                                                                  | Current availability                                                 |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Peer discussion, delegation, evidence/disputes, mixed models                | Council web and CLI                                                  |
-| Real file reads/edits, commands and tests                                   | OpenCode worker; write/bash verified against installed runtime       |
-| Live tool results, approvals, questions, diff previews                      | Council web; CLI prints activity and directs approvals to web        |
-| Persistent coding session per peer                                          | Worker session mapping survives worker restart                       |
-| Full OpenCode terminal UI                                                   | `council code` / native OpenCode attach                              |
-| Native OpenCode web UI, LSP, MCP, skills, plugins, formatters               | Provided by configured OpenCode runtime; not all combinations tested |
-| Hosted file tree, text editor, command terminal, export/import              | Available for ephemeral Node.js projects                             |
-| Interactive PTY, LSP editor, native undo/revert controls inside Council web | Not yet integrated                                                   |
-| One-click hosted coding sandboxes                                           | Limited Node.js containers; no network/dependency downloads          |
-| Distributed replicas and durable worker leases                              | Not implemented; single Council server                               |
-| Real-model coding benchmark superiority                                     | Not established                                                      |
-
-This is a working coding integration, **not yet full web-feature parity with
-OpenCode**. The remaining native UI, persistent projects and broader runtime work must be tracked and tested
-before making that claim.
-
 ## Validation
 
 `npm test` covers request ownership, stale approval rejection, session reuse,
@@ -147,8 +155,8 @@ It does not touch an existing model server or certify model reasoning quality.
 
 No RunPod changes are needed to deploy the hosted app. When the separate Rigveda
 job is deliberately paused/completed, update the Council checkout on the pod,
-use the prepared OpenCode configuration/model endpoint and launch the coding
-worker against a **separate coding project**. Do not attach it to the Rigveda
+launch standalone Council with the existing model endpoint against a
+**separate coding project**. The optional OpenCode worker is also available. Do not attach it to the Rigveda
 working directory while that job is running. Volume resizing and BF16 model
 changes remain with the session coordinating that work.
 
@@ -177,7 +185,7 @@ Projects are deliberately temporary: 30-minute idle timeout, two-hour absolute
 lifetime, and deletion on broker restart/deployment. Export is limited to 500
 text files / 240 KB; individual editor files to 128 KB. `node_modules`, `.git`,
 symlinks and binary files are not exported. Keep large/persistent projects in a
-connected OpenCode workspace. Imported files may partially succeed if a later
+[standalone Council directory](NATIVE.md). Imported files may partially succeed if a later
 file is invalid; the error is shown and existing files remain inspectable.
 
 The root-owned broker listens only on a Unix socket accessible to the Council

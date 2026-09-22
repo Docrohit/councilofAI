@@ -1,3 +1,5 @@
+import { ProjectWorkspace } from "./ProjectWorkspace";
+import { CommunicationPanel } from "./CommunicationPanel";
 import {
   useEffect,
   useMemo,
@@ -789,7 +791,7 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [tab, setTab] = useState("discussion");
   const [modal, setModal] = useState<
-    "connections" | "team" | "files" | "cli" | "benchmarks" | null
+    "connections" | "team" | "files" | "cli" | "benchmarks" | "project" | null
   >(null);
   const [sidebar, setSidebar] = useState(false);
   const [search, setSearch] = useState("");
@@ -1046,6 +1048,10 @@ export default function App() {
         <button className="nav-button" onClick={() => setModal("benchmarks")}>
           <ShieldCheck size={16} /> Benchmarks
         </button>
+        <button className="nav-button" onClick={() => setModal("project")}>
+          <Terminal size={16} /> Coding project{" "}
+          {config.sandbox && <span className="count">On</span>}
+        </button>
         <button className="nav-button" onClick={() => setModal("files")}>
           <FileText size={16} /> Workspace files
         </button>
@@ -1152,7 +1158,9 @@ export default function App() {
                     ))}
                   </div>
                   <span>
-                    {config.members.length} peers · one shared conversation
+                    {config.members.length} peers · shared board and direct
+                    conversations
+                    {config.sandbox ? " · hosted coding enabled" : ""}
                   </span>
                   <button
                     className="inline-link"
@@ -1239,6 +1247,18 @@ export default function App() {
                       <Network size={15} /> Engagement
                     </button>
                     <button
+                      className={tab === "board" ? "active" : ""}
+                      onClick={() => setTab("board")}
+                    >
+                      <Radio size={15} /> Board
+                    </button>
+                    <button
+                      className={tab === "conversations" ? "active" : ""}
+                      onClick={() => setTab("conversations")}
+                    >
+                      <Users size={15} /> Conversations
+                    </button>
+                    <button
                       className={tab === "knowledge" ? "active" : ""}
                       onClick={() => setTab("knowledge")}
                     >
@@ -1279,7 +1299,13 @@ export default function App() {
                       automatically.
                     </div>
                   )}
-                  {tab === "knowledge" ? (
+                  {tab === "board" || tab === "conversations" ? (
+                    <CommunicationPanel
+                      events={events}
+                      members={members}
+                      mode={tab}
+                    />
+                  ) : tab === "knowledge" ? (
                     <KnowledgePanel knowledge={knowledge} members={members} />
                   ) : tab === "answer" ? (
                     run.final ? (
@@ -1621,6 +1647,23 @@ export default function App() {
           }}
           close={() => setModal(null)}
           connect={() => setModal("connections")}
+        />
+      )}
+      {modal === "project" && (
+        <ProjectWorkspace
+          close={() => setModal(null)}
+          enabled={!!config.sandbox}
+          running={active}
+          enable={async (value) => {
+            const next = { ...config, sandbox: value };
+            setConfig(next);
+            try {
+              await api("/team", "PUT", next);
+            } catch (error) {
+              setConfig(config);
+              throw error;
+            }
+          }}
         />
       )}
       {modal === "files" && <Files close={() => setModal(null)} />}

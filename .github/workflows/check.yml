@@ -20,6 +20,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: docker pull node:22-bookworm-slim && node scripts/verify-sandbox.mjs
+      - run: node --import tsx scripts/verify-council-sandbox.mjs
       - run: npm run build
       - run: bash -n deploy/deploy.sh && node --check deploy/environment.mjs
       - run: npx playwright install --with-deps chromium

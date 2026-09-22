@@ -31,7 +31,9 @@ Public Markdown can contain fenced `council` JSON blocks. Each complete block is
 
 Supported fields:
 
-- `messages`: direct or broadcast public engagement; delivered to the next model turn.
+- `messages`: legacy direct or broadcast engagement; delivered to the next model turn.
+- `broadcasts`: durable posts and replies on the shared board.
+- `conversations`: two-peer threads, versioned proposals, explicit reviews and optional joint publication.
 - `tasks`: work delegated to an existing peer, without forcing a permanent hierarchy.
 - `delegates`: invite specialists on the same or another selected model.
 - `organization`: choose a role and optional reporting relationship.
@@ -42,13 +44,13 @@ Supported fields:
 - `acceptances`: evidence-based acceptance of an exact finding revision.
 - `proposal`: propose a complete final answer and rationale.
 - `review`: endorse or challenge an exact candidate-answer ID.
-- `tools`: list/read workspace files or propose a reviewed write.
+- `tools`: board/thread history, virtual file proposals, and (when the user enables it) real hosted project reads/writes/commands.
 
-Structured findings and work registries are shared to avoid repeated investigations. This is not a semantic-equivalence engine: differently named duplicate work can still occur. Provider reasoning is displayed but not copied into peer prompts. Public findings and agent messages are shared.
+Structured findings and work registries are shared to avoid repeated investigations. This is not a semantic-equivalence engine: differently named duplicate work can still occur. Provider reasoning is displayed but not copied into peer prompts. Public findings and board messages are shared. Direct-thread bodies are included only for participants; the user can inspect all of them.
 
 ## Completion and persistence
 
-A final candidate needs explicit endorsement from all participating peers, no open finding disputes, no uncompleted work claims, and no pending task/challenge/tool-result mail. Endorsement is evidence of agreement, not proof of correctness. A run that cannot satisfy these conditions within its budget is `needs_review`; it receives a qualified answer with outstanding objections and can be continued with saved state.
+A final candidate needs explicit endorsement from all participating peers, no open finding disputes or unresolved conversation proposals, no uncompleted work claims, and no pending task/challenge/tool-result mail. Endorsement is evidence of agreement, not proof of correctness. A run that cannot satisfy these conditions within its budget is `needs_review`; it receives a qualified answer with outstanding objections and can be continued with saved state.
 
 SQLite stores users, sessions, provider metadata, encrypted secrets, runs, events, workspace files, proposals, and saved team preferences. SSE IDs are durable and scoped by run ownership. Disconnecting the browser does not stop the run. Stop aborts active provider requests. A process restart marks running work interrupted; restart recovery is not transparent continuation of an in-flight model request.
 
@@ -75,3 +77,17 @@ Unit/integration/browser tests use scripted or protocol fixture outputs. They ca
 ## Native coding runtime
 
 `cli/opencode.ts` pins a loopback runtime and a locally chosen project, maps each run/peer to a persistent native session, forwards public messages and bounded tool/diff activity, and aborts owned sessions on cancellation. The hosted bridge routes permission/question responses only to active jobs belonging to the signed-in user. Responses remain queued until acknowledged. OpenCode credentials stay local. Native inner-loop model calls are distinct from Council turn budgets. See [Coding](CODING.md) for isolation, concurrent-edit and recovery limits.
+
+## Hosted project broker
+
+`server/sandbox.ts` reaches `deploy/sandbox-broker.mjs` over a permission-limited
+Unix socket. The app derives the owner from authenticated identity, never the
+request body. The broker maps that owner to a fixed container and accepts only
+bounded operations. It rejects overlapping operations on a project; the agent
+scheduler additionally serializes tool calls. Optimistic SHA checks catch edits
+between read and write. The app blocks manual writes while the account has an
+active council. Broker sessions are ephemeral, never part of SQLite backups.
+
+See [Coding](CODING.md) for exact resource limits, expiration, export restrictions
+and the remaining gaps with a native OpenCode workspace. Real Docker integration
+checks run in CI before deployment; they are separate from model benchmarks.

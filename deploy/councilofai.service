@@ -9,6 +9,7 @@ User=councilofai
 Group=councilofai
 WorkingDirectory=/srv/councilofai/current
 EnvironmentFile=/etc/councilofai/council.env
+Environment=COUNCIL_SANDBOX_SOCKET=/run/council-sandbox/broker.sock
 ExecStart=/usr/bin/node --import tsx server/index.ts --production
 Restart=on-failure
 RestartSec=5

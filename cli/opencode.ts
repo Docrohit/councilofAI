@@ -438,6 +438,9 @@ export class OpenCodeWorker {
       );
       yield { type: "usage", ...total };
       success = true;
+    } catch (error) {
+      if (request.signal.aborted) throw request.signal.reason;
+      throw error;
     } finally {
       if (!success)
         for (const id of ownedSessions)

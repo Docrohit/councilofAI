@@ -61,6 +61,18 @@ test("signup, responsive workspace, one model with five peers, resolved finding 
   await expect(page.locator(".run-status")).toHaveText("completed", {
     timeout: 40_000,
   });
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Shared broadcast board" }),
+  ).toBeVisible();
+  await expect(page.locator(".communication-card").first()).toBeVisible();
+  await page
+    .getByRole("button", { name: "Conversations", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Agent conversations" }),
+  ).toBeVisible();
+  await expect(page.locator(".communication-card").first()).toBeVisible();
   await page.getByRole("button", { name: /Findings/ }).click();
   await expect(
     page.getByRole("heading", { name: "Build on what is already known." }),

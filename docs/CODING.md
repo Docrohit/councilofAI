@@ -61,8 +61,7 @@ silently grant every tool access. Existing sessions retain their original policy
 OpenCode runs with the operating-system permissions of its process. A pinned
 working directory is **not an OS sandbox**: shell commands, MCP servers and
 plugins can reach resources available to that process. Use a disposable worktree
-and a container/VM for untrusted code. The public Council server never executes
-these commands; it routes authenticated jobs to a worker you launch. Do not run
+and a container/VM for untrusted code. These OpenCode commands run on the worker computer; Council routes authenticated jobs to the worker you launch. The separate hosted workspace described below uses a constrained container. Do not run
 visitor workers on the Hostinger application host.
 
 Project prompts, public output, tool inputs/results, requested permissions and
@@ -109,21 +108,22 @@ OpenCode configuration and dependencies. They are not installed or configured
 by connecting a worker. Native subagents stay native; use Council delegation
 when a specialist must participate in Council's peer ledger and budgets.
 
-| Capability | Current availability |
-| --- | --- |
-| Peer discussion, delegation, evidence/disputes, mixed models | Council web and CLI |
-| Real file reads/edits, commands and tests | OpenCode worker; write/bash verified against installed runtime |
-| Live tool results, approvals, questions, diff previews | Council web; CLI prints activity and directs approvals to web |
-| Persistent coding session per peer | Worker session mapping survives worker restart |
-| Full OpenCode terminal UI | `council code` / native OpenCode attach |
-| Native OpenCode web UI, LSP, MCP, skills, plugins, formatters | Provided by configured OpenCode runtime; not all combinations tested |
-| Full native editor, file tree, PTY, undo/revert controls inside Council web | Not yet integrated |
-| One-click hosted isolated coding sandboxes | Not implemented; bring a worker/container |
-| Distributed replicas and durable worker leases | Not implemented; single Council server |
-| Real-model coding benchmark superiority | Not established |
+| Capability                                                                  | Current availability                                                 |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Peer discussion, delegation, evidence/disputes, mixed models                | Council web and CLI                                                  |
+| Real file reads/edits, commands and tests                                   | OpenCode worker; write/bash verified against installed runtime       |
+| Live tool results, approvals, questions, diff previews                      | Council web; CLI prints activity and directs approvals to web        |
+| Persistent coding session per peer                                          | Worker session mapping survives worker restart                       |
+| Full OpenCode terminal UI                                                   | `council code` / native OpenCode attach                              |
+| Native OpenCode web UI, LSP, MCP, skills, plugins, formatters               | Provided by configured OpenCode runtime; not all combinations tested |
+| Hosted file tree, text editor, command terminal, export/import              | Available for ephemeral Node.js projects                             |
+| Interactive PTY, LSP editor, native undo/revert controls inside Council web | Not yet integrated                                                   |
+| One-click hosted coding sandboxes                                           | Limited Node.js containers; no network/dependency downloads          |
+| Distributed replicas and durable worker leases                              | Not implemented; single Council server                               |
+| Real-model coding benchmark superiority                                     | Not established                                                      |
 
 This is a working coding integration, **not yet full web-feature parity with
-OpenCode**. The remaining UI and hosted workspace work must be tracked and tested
+OpenCode**. The remaining native UI, persistent projects and broader runtime work must be tracked and tested
 before making that claim.
 
 ## Validation
@@ -151,3 +151,51 @@ use the prepared OpenCode configuration/model endpoint and launch the coding
 worker against a **separate coding project**. Do not attach it to the Rigveda
 working directory while that job is running. Volume resizing and BF16 model
 changes remain with the session coordinating that work.
+
+## Hosted coding workspace
+
+1. Open **Coding project** from the sidebar and create an isolated project.
+2. Create or import files. Enable **Allow agents to edit and run commands**.
+   This authorizes project tool execution for subsequently started councils;
+   it does not give agents shell access to the application server.
+3. Start a goal such as “Create a two-file Node project that solves and tests
+   x^4 - 5x^2 + 4 = 0; verify every root by substitution.”
+4. Inspect tool outputs in Discussion. Open the project to read the files.
+   Manual writes/commands are disabled during a council to avoid competing edits.
+5. Export the project as JSON before it expires. Import accepts an empty project.
+
+Model-only peers can use `project_tree`, `project_read`, `project_write`, and
+`project_exec` when enabled. Writes require the SHA from the last read, or null
+for new files. Operations serialize across peers; outdated writes are rejected.
+The command terminal executes real shell commands; it is not a PTY and does not
+support interactive programs. Each command starts afresh in `/workspace`.
+Cancellation stops new tool work; an already running foreground command is
+bounded by its 30-second timeout. Background processes remain contained until
+project deletion/expiration.
+
+Projects are deliberately temporary: 30-minute idle timeout, two-hour absolute
+lifetime, and deletion on broker restart/deployment. Export is limited to 500
+text files / 240 KB; individual editor files to 128 KB. `node_modules`, `.git`,
+symlinks and binary files are not exported. Keep large/persistent projects in a
+connected OpenCode workspace. Imported files may partially succeed if a later
+file is invalid; the error is shown and existing files remain inspectable.
+
+The root-owned broker listens only on a Unix socket accessible to the Council
+service group. It offers fixed operations, not arbitrary Docker flags. Containers
+run as uid 1000 with no host bind mounts, no credentials, no network, read-only
+root, dropped capabilities, no-new-privileges, default Docker seccomp, 0.5 CPU,
+256 MB memory/no swap, 64 processes, and bounded tmpfs mounts. At most four
+containers and one per account are active. The web service is **not** in the
+Docker group and receives no Docker socket. Containers share the host kernel;
+this is not VM isolation or a security audit. See Docker's
+[resource limits](https://docs.docker.com/engine/containers/resource_constraints/),
+[tmpfs documentation](https://docs.docker.com/engine/storage/tmpfs/) and
+[security model](https://docs.docker.com/engine/security/).
+
+CI exercises actual Docker file writes, Node tests, path/symlink rejection,
+read-only root, network denial, owner separation and conflicting operations.
+`node --import tsx scripts/verify-council-sandbox.mjs` additionally connects a
+scripted model to the real Council API and Docker broker to verify a two-agent
+multi-file coding run end to end. These fixtures establish system behavior,
+not model quality or benchmark superiority. Math/logic benchmarks keep hosted
+tools disabled for both council and single-model sides.

@@ -1,3 +1,4 @@
+import { sandboxRequest } from "./sandbox.ts";
 import express, {
   type Request,
   type Response,
@@ -60,6 +61,7 @@ const member = z.object({
   providerId: z.string().min(1).max(80),
 });
 const configSchema = z.object({
+  sandbox: z.boolean().default(false),
   members: z.array(member).min(1).max(32),
   providerIds: z.array(z.string().min(1).max(80)).min(1).max(20),
   maxAgents: z.number().int().min(1).max(128).nullable().default(12),
@@ -287,6 +289,47 @@ export function createApp(directory: string, production = false) {
     next();
   });
   app.get("/api/me", (_req, res) => res.json({ user: userOf(res) }));
+  app.get("/api/sandbox", async (_req, res) => {
+    if (!process.env.COUNCIL_SANDBOX_SOCKET) {
+      res.json({ available: false, active: false });
+      return;
+    }
+    res.json(await sandboxRequest(userOf(res).id, { action: "status" }));
+  });
+  app.post("/api/sandbox", async (req, res) => {
+    const action = z
+      .discriminatedUnion("action", [
+        z.object({ action: z.enum(["create", "destroy", "tree", "export"]) }),
+        z.object({
+          action: z.literal("read"),
+          path: z.string().min(1).max(200),
+        }),
+        z.object({
+          action: z.literal("write"),
+          path: z.string().min(1).max(200),
+          content: z.string().max(128000),
+          sha: z.string().nullable(),
+        }),
+        z.object({
+          action: z.literal("exec"),
+          command: z.string().min(1).max(8000),
+        }),
+      ])
+      .parse(req.body);
+    if (
+      ["write", "exec", "destroy"].includes(action.action) &&
+      [...engine.active.values()].some((r) => r.userId === userOf(res).id)
+    ) {
+      res
+        .status(409)
+        .json({
+          error:
+            "Stop the active council before manually changing its project.",
+        });
+      return;
+    }
+    res.json(await sandboxRequest(userOf(res).id, action));
+  });
   app.post("/api/auth/logout", (_req, res) => {
     db.prepare("DELETE FROM sessions WHERE hash=?").run(res.locals.session);
     res.clearCookie("council_session", {
@@ -466,6 +509,8 @@ export function createApp(directory: string, production = false) {
       });
       return;
     }
+    // Model-only comparisons must not grant tools exclusively to the council.
+    data.config.sandbox = false;
     const result: BenchmarkResult = {
       id: randomUUID(),
       status: "running",
@@ -504,7 +549,7 @@ export function createApp(directory: string, production = false) {
         .map(({ sharedState, resumeState, ...run }) => run),
     ),
   );
-  app.post("/api/runs", (req, res) => {
+  app.post("/api/runs", async (req, res) => {
     const userId = userOf(res).id;
     const data = z
       .object({
@@ -514,6 +559,17 @@ export function createApp(directory: string, production = false) {
       })
       .parse(req.body);
     const config = data.config;
+    if (config.sandbox) {
+      const sandbox = await sandboxRequest(userId, { action: "status" });
+      if (!sandbox.active) {
+        res
+          .status(400)
+          .json({
+            error: "Create a hosted project before enabling coding tools.",
+          });
+        return;
+      }
+    }
     if (
       benchmarks.busy(userId) ||
       [...engine.active.values()].some((a) => a.userId === userId)
@@ -836,12 +892,10 @@ export function createApp(directory: string, production = false) {
       reply,
     );
     if (!result) {
-      res
-        .status(409)
-        .json({
-          error:
-            "This request has ended, was answered, or belongs to another account.",
-        });
+      res.status(409).json({
+        error:
+          "This request has ended, was answered, or belongs to another account.",
+      });
       return;
     }
     if (result.context)

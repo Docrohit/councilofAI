@@ -73,7 +73,7 @@ If a provider fails, Council can move the same agent identity to another selecte
 
 The web benchmark screen compares the council with a single-model baseline on identical tasks. Choose one baseline call or give the baseline the same number of calls for sequential self-review. Reports record deterministic correctness, calls, elapsed time, and provider-reported tokens when available. Equal calls do not imply equal compute or cost.
 
-The default ten original tasks are integration smoke tests, not evidence of general reasoning superiority. To prepare a reproducible sample from the official GSM8K test set:
+The default thirteen original tasks are integration smoke tests, not evidence of general reasoning superiority. To prepare a reproducible sample from the official GSM8K test set:
 
 ```sh
 npm run import:gsm8k -- 50 council-pilot-v1
@@ -136,7 +136,7 @@ Tokens last 30 days, are hashed on the server, and are stored with mode `0600` u
 
 Agents can list/read the account’s virtual text files and propose changes. Proposed writes show the original and proposed content for review. Accepting checks the original version to prevent stale overwrites. Files belong to a Council account and are stored in SQLite; they are not arbitrary files on the server or visitor’s computer.
 
-For real projects, the optional **OpenCode worker** executes native coding tools on the connected project computer. It exposes tool activity, permission requests, questions and available diffs in Council. The public application server does not execute project code. Native LSP/MCP/plugins require normal OpenCode configuration. The full native TUI is available through the CLI; Council’s web editor, terminal and sandbox experience is not yet at full OpenCode parity. See [Coding](docs/CODING.md).
+For real projects, the optional **OpenCode worker** executes native coding tools on the connected project computer. It exposes tool activity, permission requests, questions and available diffs in Council. The web process does not execute project code directly. The hosted Coding project runs Node.js files and commands in a separate, bounded Docker container through a restricted broker. Native LSP/MCP/plugins require normal OpenCode configuration. The full native TUI is available through the CLI; Council now includes a text editor, file tree, noninteractive command terminal and ephemeral hosted sandbox. Interactive PTY, LSP, native undo/revert and broader hosted environments remain unfinished. See [Coding](docs/CODING.md).
 
 ## Verification
 
@@ -151,3 +151,22 @@ npm run build
 Tests cover model protocol adapters, fragmented SSE/NDJSON, truncation, shared findings and dispute revision rules, work ownership, account isolation, secret encryption, replay, cancellation, live specialist startup, larger teams, resumable budget stops, and desktop/mobile browser flows. Tests use local fixtures and a labelled scripted model. They do not certify reasoning quality, live provider compatibility for every model, or hosting security at scale.
 
 See [Architecture](docs/ARCHITECTURE.md), [Hosting](docs/HOSTING.md), [OpenCode review](docs/OPENCODE_REVIEW.md), and [Third-party notices](THIRD_PARTY_NOTICES.md).
+
+### Broadcasts and direct collaboration
+
+Open **Board** in a session to see the shared message board, or **Conversations**
+to follow two-agent discussions. New specialists inherit the board. A direct
+thread can propose a conclusion, collect explicit reviews from both participants
+on the same revision, and publish their joint conclusion. Editing the proposal
+clears prior votes. Unresolved proposals prevent a completed status; consensus
+is a peer judgment, never proof of truth. See [Communication](docs/COMMUNICATION.md).
+
+### Try a hosted coding project
+
+Open **Coding project → Create isolated project**, then enable agent access.
+Your next council can read, create and edit multiple files and run Node tests.
+Use the editor and command terminal to inspect the result. Export your project:
+these workspaces expire after 30 minutes idle, two hours total, or a broker
+restart. They have no network, a 64 MB project, 256 MB memory, and 30-second
+commands. For dependency installation, larger projects and full native coding
+tools, connect an OpenCode worker. Details: [Coding](docs/CODING.md).

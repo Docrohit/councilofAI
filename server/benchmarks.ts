@@ -80,6 +80,26 @@ const smokeSuite = [
     expected: "3",
     numeric: true,
   },
+  {
+    id: "roots-01",
+    domain: "math",
+    prompt:
+      "Find all real roots of x^4 - 5*x^2 + 4 = 0. Return the roots in ascending order separated by commas, without spaces.",
+    expected: "-2,-1,1,2",
+  },
+  {
+    id: "extraneous-01",
+    domain: "math",
+    prompt: "Solve sqrt(x+6)=x over the real numbers. Return the valid x only.",
+    expected: "3",
+    numeric: true,
+  },
+  {
+    id: "implication-01",
+    domain: "logic",
+    prompt: "If P implies Q, and Q is true, must P be true? Answer yes or no.",
+    expected: "no",
+  },
 ];
 const importedSchema = z.object({
   name: z.string().max(200),

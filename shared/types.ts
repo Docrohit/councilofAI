@@ -28,6 +28,7 @@ export interface Member {
   reportsTo?: string;
 }
 export interface RunConfig {
+  sandbox?: boolean;
   members: Member[];
   providerIds: string[];
   maxAgents: number | null;
@@ -59,6 +60,7 @@ export interface Run {
   sharedState?: SharedState;
 }
 export interface SharedState {
+  communication?: import("../server/communication").CommunicationState;
   peers: {
     member: Member;
     task: string;

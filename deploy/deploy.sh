@@ -24,17 +24,24 @@ chmod -R a+rX "$release"
 MODEL_ENV_SOURCE=${MODEL_ENV_SOURCE:-/var/www/html/youtube_doodle_project/.env} node deploy/environment.mjs
 if [[ -L /srv/councilofai/current ]]; then python3 deploy/backup.py; fi
 previous=$(readlink -f /srv/councilofai/current || true)
+# Hosted execution is exposed only through a narrow broker; never add the app
+# user to the Docker group or mount the Docker socket in the web service.
+command -v docker >/dev/null
+docker pull node:22-bookworm-slim
+install -m 644 deploy/councilofai-sandbox.service /etc/systemd/system/councilofai-sandbox.service
 install -m 644 deploy/councilofai.service /etc/systemd/system/councilofai.service
 install -m 644 deploy/councilofai-backup.service deploy/councilofai-backup.timer /etc/systemd/system/
 ln -sfn "$release" /srv/councilofai/next
 mv -Tf /srv/councilofai/next /srv/councilofai/current
 systemctl daemon-reload
 systemctl enable councilofai.service councilofai-backup.timer
+systemctl enable councilofai-sandbox.service
+systemctl restart councilofai-sandbox.service
 systemctl restart councilofai.service
 systemctl start councilofai-backup.timer
 healthy=false
 for attempt in $(seq 1 30); do
- if curl -fsS http://127.0.0.1:4310/api/health >/dev/null; then healthy=true; break; fi
+ if curl -fsS http://127.0.0.1:4310/api/health >/dev/null && curl -fsS --unix-socket /run/council-sandbox/broker.sock -H 'Content-Type: application/json' -d '{"owner":"deployment-health","action":"status"}' http://localhost/ >/dev/null; then healthy=true; break; fi
  sleep 1
 done
 if [[ "$healthy" != true ]]; then
@@ -42,6 +49,7 @@ if [[ "$healthy" != true ]]; then
  if [[ -n "$previous" && "$previous" != "$release" ]]; then
   ln -sfn "$previous" /srv/councilofai/next
   mv -Tf /srv/councilofai/next /srv/councilofai/current
+  systemctl restart councilofai-sandbox.service
   systemctl restart councilofai.service
  fi
  exit 1

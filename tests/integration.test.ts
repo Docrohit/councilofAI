@@ -593,3 +593,202 @@ test("benchmark compares council and single-model refinement with deterministic 
     await new Promise<void>((r) => model.close(() => r()));
   }
 });
+
+test("two peers agree on a revision and broadcast it while a third sees only published contents", async () => {
+  let outsiderSawPrivate = false;
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      system = body.messages[0].content,
+      user = body.messages[1].content;
+    const board = JSON.parse(
+      user
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    const id = system.includes("NAME: Atlas")
+      ? "peer-1"
+      : system.includes("NAME: Sage")
+        ? "peer-2"
+        : "peer-3";
+    if (id === "peer-3" && user.includes("private-draft-unique"))
+      outsiderSawPrivate = true;
+    const thread = board.communication.conversations[0];
+    let actions: any = {};
+    if (id === "peer-1" && !thread)
+      actions = {
+        broadcasts: [{ content: "Checking all roots" }],
+        conversations: [
+          {
+            to: "peer-2",
+            topic: "Roots",
+            message: "private-draft-unique",
+            proposal: {
+              summary: "Roots are -2,-1,1,2",
+              evidence: ["Substitution into quartic"],
+            },
+          },
+        ],
+      };
+    else if (
+      thread?.proposal &&
+      !thread.proposal.reviews[id] &&
+      id !== "peer-3"
+    )
+      actions = {
+        conversations: [
+          {
+            threadId: thread.id,
+            review: {
+              revision: 1,
+              agree: true,
+              reason: "All four substitutions and degree checked",
+            },
+          },
+        ],
+      };
+    else if (
+      thread?.proposal &&
+      Object.keys(thread.proposal.reviews).length === 2 &&
+      !thread.proposal.publishedPostId
+    )
+      actions = {
+        conversations: [{ threadId: thread.id, publish: true }],
+        proposal: {
+          answer: "Roots are -2,-1,1,2",
+          rationale: "Both checks complete",
+        },
+      };
+    else if (board.candidate)
+      actions = {
+        review: {
+          candidateId: board.candidate.id,
+          agree: true,
+          reason: "Published evidence checked",
+        },
+      };
+    const text =
+      "Public progress.\n```council\n" + JSON.stringify(actions) + "\n```";
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [{ delta: { content: text }, finish_reason: null }],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Communication",
+        email: "communication@example.test",
+        password: "long-password-123",
+      });
+      const p = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const r = await api(
+        "/runs",
+        {
+          prompt: "Verify quartic roots",
+          config: cfg([p.data.id], 3, { maxCalls: 24 }),
+        },
+        auth.cookie,
+      );
+      const result = await done(api, auth.cookie, r.data.id);
+      assert.equal(
+        result.run.status,
+        "completed",
+        JSON.stringify(result.events.filter((e: any) => e.type === "warning")),
+      );
+      assert.equal(outsiderSawPrivate, false);
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "board.post" && e.data.post.coauthors?.length === 2,
+        ),
+      );
+      assert.equal(
+        result.run.sharedState.communication.conversations[0].proposal.revision,
+        1,
+      );
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
+
+test("sandbox API derives ownership from authentication and blocks manual writes during a run", async () => {
+  const socket = path.join(tmpdir(), `council-sandbox-${Date.now()}.sock`);
+  const requests: any[] = [];
+  const broker = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    requests.push(JSON.parse(raw));
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ available: true, active: true, files: [] }));
+  });
+  await new Promise<void>((r) => broker.listen(socket, r));
+  const previous = process.env.COUNCIL_SANDBOX_SOCKET;
+  process.env.COUNCIL_SANDBOX_SOCKET = socket;
+  try {
+    await harness(async ({ api, engine }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Sandbox",
+        email: "sandbox@example.test",
+        password: "long-password-123",
+      });
+      assert.equal(
+        (await api("/sandbox", { action: "exec", command: "node --test" }))
+          .status,
+        401,
+      );
+      const result = await api(
+        "/sandbox",
+        { action: "tree", owner: "someone-else" },
+        auth.cookie,
+      );
+      assert.equal(result.status, 200);
+      assert.equal(requests.at(-1).owner, auth.data.user.id);
+      engine.active.set("fixture", {
+        userId: auth.data.user.id,
+        controller: new AbortController(),
+      });
+      assert.equal(
+        (
+          await api(
+            "/sandbox",
+            { action: "exec", command: "echo nope" },
+            auth.cookie,
+          )
+        ).status,
+        409,
+      );
+      assert.equal(
+        (await api("/sandbox", { action: "tree" }, auth.cookie)).status,
+        200,
+      );
+      engine.active.delete("fixture");
+    });
+  } finally {
+    if (previous) process.env.COUNCIL_SANDBOX_SOCKET = previous;
+    else delete process.env.COUNCIL_SANDBOX_SOCKET;
+    broker.closeAllConnections();
+    await new Promise<void>((r) => broker.close(() => r()));
+  }
+});

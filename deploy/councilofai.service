@@ -1,0 +1,26 @@
+[Unit]
+Description=Council of AI web and agent service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=councilofai
+Group=councilofai
+WorkingDirectory=/srv/councilofai/current
+EnvironmentFile=/etc/councilofai/council.env
+ExecStart=/usr/bin/node --import tsx server/index.ts --production
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/councilofai
+UMask=0077
+MemoryMax=2G
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

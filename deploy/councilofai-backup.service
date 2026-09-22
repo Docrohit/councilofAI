@@ -1,0 +1,6 @@
+[Unit]
+Description=Consistent Council database and encryption-key backup
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/councilofai/current/deploy/backup.py
+UMask=0077

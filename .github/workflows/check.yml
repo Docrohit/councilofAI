@@ -1,7 +1,13 @@
-name: Check
-on: [push, pull_request]
+name: Check and deploy
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: council-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -10,10 +16,54 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: bash -n deploy/deploy.sh && node --check deploy/environment.mjs
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - name: Package verified release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: tar -czf council-release.tar.gz dist server shared cli deploy package.json package-lock.json
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: council-release
+          path: council-release.tar.gz
+          retention-days: 7
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+      SERVER_KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: council-release
+      - name: Configure authenticated deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_HOST" && test -n "$SERVER_SSH_KEY" && test -n "$SERVER_KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/council_deploy
+          printf '%s\n' "$SERVER_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/council_deploy ~/.ssh/known_hosts
+      - name: Deploy isolated Council service
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="/tmp/council-release-$GITHUB_SHA.tar.gz"
+          scp -i ~/.ssh/council_deploy -o BatchMode=yes council-release.tar.gz "root@$SERVER_HOST:$archive"
+          tar -xzf council-release.tar.gz deploy/deploy.sh
+          ssh -i ~/.ssh/council_deploy -o BatchMode=yes "root@$SERVER_HOST" "PUBLIC_IPV4='$SERVER_HOST' bash -s -- '$archive' '$GITHUB_SHA'" < deploy/deploy.sh
+      - name: Remove deployment credentials
+        if: always()
+        run: rm -f ~/.ssh/council_deploy

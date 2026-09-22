@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily Council backup
+[Timer]
+OnCalendar=*-*-* 03:25:00
+Persistent=true
+RandomizedDelaySec=600
+[Install]
+WantedBy=timers.target

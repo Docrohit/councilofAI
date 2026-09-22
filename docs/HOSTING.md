@@ -43,4 +43,24 @@ Or build the included Dockerfile and use `compose.yaml` behind your existing HTT
 - Before broad public signup, add email verification/recovery, account deletion/retention controls, stronger shared abuse limits, monitoring, backups/restore drills, and an independent security review. Resource controls are not dollar-denominated billing caps. Users should also configure provider-side spending limits.
 - Current tools work only with virtual text files. Shell/browsing/code execution requires a separate per-user sandbox design; do not grant untrusted hosted agents access to the server host.
 
-No infrastructure has been provisioned and no public deployment is implied by these files.
+Confirm the latest GitHub Actions deployment and public HTTPS health endpoint before considering a release live.
+
+## Council of AI deployment
+
+The deployment workflow in `.github/workflows/check.yml` verifies tests, builds the app, and deploys a verified artifact on pushes to `main`. Pull requests only run checks. Manual workflow dispatch repeats verification and deployment, including HTTPS activation when DNS becomes ready.
+
+Repository secrets required: `SERVER_HOST`, `SERVER_SSH_KEY`, and `SERVER_KNOWN_HOSTS`. Pin the known SSH host key using a previously trusted connection. Never disable host-key verification. Initial system provisioning requires a privileged deployment identity; the application itself runs as the dedicated unprivileged `councilofai` user.
+
+Deployment manages only Council's own service and virtual host:
+
+- URL: `https://councilofai.nftforger.com`
+- Immutable application releases: `/srv/councilofai/releases/<commit>`; current symlink at `/srv/councilofai/current`
+- Service: `councilofai.service`, loopback port 4310
+- Persistent database: `/var/lib/councilofai/council.sqlite`
+- Root-only environment: `/etc/councilofai/council.env`; stable encryption key retained across deployments
+- Daily consistent SQLite and environment backups: `/var/backups/councilofai`, last 14 snapshots; copy these to off-server storage separately
+- TLS: Let's Encrypt via webroot, with an Nginx reload hook after renewal
+
+The server's existing model environment can be read through `MODEL_ENV_SOURCE` during initial setup. Only selected OpenAI/Anthropic/GLM settings are copied when missing; source files are untouched. These server keys are not automatically granted to signups. Users can add their own account-scoped model connections.
+
+A failed application health check restores the previous application symlink. Database schema rollback is not automatic; restore a consistent backup for an incompatible migration. Existing environment settings are retained. A service deployment before DNS is ready leaves a setup-only HTTP page; rerun the workflow after the A record resolves to activate HTTPS.

@@ -51,7 +51,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$SERVER_HOST" && test -n "$SERVER_SSH_KEY" && test -n "$SERVER_KNOWN_HOSTS"
+          : "${SERVER_HOST:?Configure the SERVER_HOST repository secret}"
+          : "${SERVER_SSH_KEY:?Configure the SERVER_SSH_KEY repository secret}"
+          : "${SERVER_KNOWN_HOSTS:?Configure the SERVER_KNOWN_HOSTS repository secret}"
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/council_deploy
           printf '%s\n' "$SERVER_KNOWN_HOSTS" > ~/.ssh/known_hosts

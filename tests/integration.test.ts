@@ -833,7 +833,18 @@ test("rejected actions feed back to the agent, recover and publish exact math ev
             description: "Check exact factors",
           },
         ],
-        tools: [{ name: "factor_integer", integer: "2045901" }],
+        tools: [
+          { name: "factor_integer", integer: "2045901" },
+          { name: "calculate", expression: "3*11*13*19*251" },
+          {
+            name: "solve_linear",
+            coefficients: [
+              ["2", "1"],
+              ["1", "-1"],
+            ],
+            constants: ["5", "1"],
+          },
+        ],
       });
     } else if (
       board.communication.board.some((p: any) =>
@@ -915,6 +926,90 @@ test("rejected actions feed back to the agent, recover and publish exact math ev
         ),
       );
       assert.equal(result.run.sharedState.work[0].state, "complete");
+      const results = result.events.filter(
+        (e: any) => e.type === "tool.result",
+      );
+      assert.equal(
+        JSON.parse(
+          results.find((e: any) => e.data.tool === "calculate").data.result,
+        ).exact,
+        "2045901",
+      );
+      assert.equal(
+        JSON.parse(
+          results.find((e: any) => e.data.tool === "solve_linear").data.result,
+        ).verified,
+        true,
+      );
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
+
+test("a team repeating status without evidence stops before exhausting its budget", async () => {
+  const model = createServer(async (req, res) => {
+    for await (const chunk of req) {
+      /* consume fixture request */
+    }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                content: "I will verify this later; waiting for another peer.",
+              },
+            },
+          ],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Stall fixture",
+        email: "stall@example.test",
+        password: "long-password-123",
+      });
+      const p = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          model: "fixture",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const r = await api(
+        "/runs",
+        {
+          prompt: "Verify a concrete fact",
+          config: cfg([p.data.id], 2, { concurrency: 1, maxCalls: 24 }),
+        },
+        auth.cookie,
+      );
+      const result = await done(api, auth.cookie, r.data.id);
+      assert.equal(result.run.status, "needs_review");
+      assert(
+        result.events.filter((e: any) => e.type === "turn.start").length < 24,
+      );
+      assert.match(result.run.final, /Stopped repeated discussion/);
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "warning" && e.data.message.includes("concrete check"),
+        ),
+      );
     });
   } finally {
     model.closeAllConnections();

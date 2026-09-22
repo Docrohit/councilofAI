@@ -87,7 +87,7 @@ persist; terminal team settings should be supplied again on a fresh launch.
 
 ## Real execution and permissions
 
-Agents can list/search/read files, inspect Git differences, create files,
+Agents can list/search/read files, inspect Git differences, move/delete text files, create files,
 replace exact text and execute shell commands. Every model write or command
 asks for approval: allow once, reject, or allow that action kind for the current
 process. Write previews include before/after text. Reads return a content hash;
@@ -162,3 +162,25 @@ See [capability status](CODING.md#capability-status) for missing features. The n
 major gaps include persistent repo access from the web, embedded interactive PTY,
 LSP/MCP/plugins, richer session management and automated project rollback. There
 is no claim of full parity or benchmark superiority in this release.
+
+## Additional coding and maths tools
+
+`/move source destination` and `/delete path` are native text-file operations.
+Agents can use `project_move` and `project_delete` with the SHA from their last
+read. Both require write approval. Moves never overwrite an existing target.
+Before removal, the runtime saves a private JSON recovery record containing the
+original content and paths under the project data directory's `file-recovery/`.
+The operation reports that record's path. This is recovery material, not a
+one-click undo interface or a complete Git rollback system. The TUI `/move`
+command currently takes paths without spaces; agent tool paths may contain spaces.
+Hosted temporary projects still expose their existing tree/read/write/exec tools.
+
+All normal sessions (including web sessions without a coding project) can call
+`calculate`, `factor_integer` and `solve_linear`. Results are posted to the shared
+board as actual tool observations. Arithmetic supports decimal literals, +, -,
+*, /, %, parentheses and integer powers from -64 to 64; it does not evaluate
+JavaScript, identifiers or arbitrary code. Linear systems are limited to eight
+equations/variables and return exact solutions plus substitution checks, or an
+inconsistent/underdetermined classification. These are bounded mathematical
+tools, not a general symbolic algebra system. Benchmark runs disable them for
+both sides' existing unaided-model comparison.

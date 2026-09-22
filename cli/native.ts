@@ -152,7 +152,11 @@ export class NativeCouncil {
           "no-network-login",
           new Date().toISOString(),
         );
-      this.project = new LocalProject(this.directory, approve);
+      this.project = new LocalProject(
+        this.directory,
+        approve,
+        path.join(this.dataDirectory, "file-recovery"),
+      );
       this.engine = new Orchestrator(this.store, undefined, this.project);
       this.syncModels();
     } catch (e) {

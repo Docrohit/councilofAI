@@ -47,6 +47,8 @@ Enter a goal to let your agents work in this directory.
 /read docs/design.md                    View a text file
 /search timeout                         Find literal text across project files
 /diff                                   Review Git changes
+/delete path                            Delete a text file after approval; save recovery copy
+/move source destination                Move a text file without overwriting the destination
 /edit src/main.js                       Open Council’s built-in text editor
 /external-edit src/main.js              Open a file in $EDITOR (defaults to vi)
 /shell                                  Open your interactive shell; exit to return
@@ -515,6 +517,37 @@ export async function startTui(options: TuiOptions) {
       filesContent = `${arg}\n\n${f.content}`;
       tab = 4;
       scroll = 0;
+      return;
+    }
+    if (cmd === "delete" || cmd === "move") {
+      const source = cmd === "delete" ? arg : words[0];
+      if (!source || (cmd === "move" && words.length !== 2))
+        throw new Error(
+          "Use /delete path or /move source destination (paths without spaces for /move).",
+        );
+      const original = await council.project.read(source);
+      if (!original.sha) throw new Error("File not found.");
+      busy = true;
+      manualController = new AbortController();
+      try {
+        const result = await council.project.execute(
+          cmd === "delete"
+            ? { action: "delete", path: source, sha: original.sha }
+            : {
+                action: "move",
+                path: source,
+                destination: words[1],
+                sha: original.sha,
+              },
+          manualController.signal,
+        );
+        filesContent = JSON.stringify(result, null, 2);
+        tab = 4;
+        notice = "File operation completed; recovery copy saved.";
+      } finally {
+        busy = false;
+        manualController = undefined;
+      }
       return;
     }
     if (cmd === "search" || cmd === "diff") {

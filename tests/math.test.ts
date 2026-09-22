@@ -67,3 +67,62 @@ test("work completion follows the documented protocol and malformed blocks have 
   assert.equal(result.commands.length, 1);
   assert.match(result.error!, /Invalid JSON/);
 });
+
+test("calculator uses exact rational arithmetic and rejects executable or unbounded input", async () => {
+  const { calculate } = await import("../server/math.ts");
+  assert.equal(calculate("0.1 + 0.2").exact, "3/10");
+  assert.equal(calculate("(37*48)-129").exact, "1647");
+  assert.equal(calculate("-2^2").exact, "-4");
+  assert.equal(calculate("2^3^2").exact, "512");
+  assert.equal(calculate("2^-3").exact, "1/8");
+  assert.equal(calculate("681967 % 11").exact, "0");
+  assert.equal(calculate("1/3 + 2/3").exact, "1");
+  for (const expr of [
+    "process.exit()",
+    "fetch('x')",
+    "1/0",
+    "0^0",
+    "2^65",
+    "2(3)",
+    "NaN",
+    "1e99999",
+    "(".repeat(100) + "1" + ")".repeat(100),
+  ])
+    assert.throws(() => calculate(expr));
+});
+
+test("linear solver distinguishes unique, inconsistent and underdetermined systems and substitutes exact solutions", async () => {
+  const { solveLinear } = await import("../server/math.ts");
+  const unique = solveLinear(
+    [
+      ["2", "1"],
+      ["1", "-1"],
+    ],
+    ["5", "1"],
+  );
+  assert.equal(unique.status, "unique");
+  assert.deepEqual(unique.particularSolution, ["2", "1"]);
+  assert(unique.verified);
+  assert.deepEqual(solveLinear([["3"]], ["1"]).particularSolution, ["1/3"]);
+  assert.equal(
+    solveLinear(
+      [
+        ["1", "1"],
+        ["2", "2"],
+      ],
+      ["1", "3"],
+    ).status,
+    "inconsistent",
+  );
+  const infinite = solveLinear(
+    [
+      ["1", "1"],
+      ["2", "2"],
+    ],
+    ["1", "2"],
+  );
+  assert.equal(infinite.status, "infinitely_many");
+  assert.deepEqual(infinite.freeVariables, [2]);
+  assert(infinite.verified);
+  assert.throws(() => solveLinear([["1"], ["1", "2"]], ["1", "2"]));
+});

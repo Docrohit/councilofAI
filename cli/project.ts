@@ -6,9 +6,13 @@ import {
   mkdir,
   open,
   realpath,
+  writeFile,
+  copyFile,
+  unlink,
 } from "node:fs/promises";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type {
@@ -46,8 +50,15 @@ export class LocalProject implements ProjectRuntime {
       request: ProjectPermission,
       signal: AbortSignal,
     ) => Promise<boolean>,
+    private recoveryDirectory?: string,
   ) {
     this.directory = realpathSync(directory);
+    this.recoveryDirectory ||= path.join(
+      process.env.COUNCIL_DATA_HOME ||
+        path.join(homedir(), ".local", "share", "council"),
+      "file-recovery",
+      sha(this.directory).slice(0, 24),
+    );
   }
   private async resolve(relative: string, parents = false) {
     if (
@@ -237,6 +248,84 @@ export class LocalProject implements ProjectRuntime {
   }
   async execute(action: ProjectAction, signal: AbortSignal): Promise<any> {
     signal.throwIfAborted();
+    if (action.action === "delete" || action.action === "move") {
+      const original = await this.read(action.path);
+      if (original.sha === null || original.sha !== action.sha)
+        throw new Error(
+          "File changed or missing. Read it again before this operation.",
+        );
+      if (action.action === "move") {
+        if (action.path === action.destination)
+          throw new Error("Choose a different destination.");
+        try {
+          if ((await this.read(action.destination)).sha !== null)
+            throw new Error(
+              "Destination already exists; it will not be overwritten.",
+            );
+        } catch (e) {
+          if ((e as Error).message !== "Parent directory not found.") throw e;
+        }
+      }
+      const allowed = await this.approve(
+        {
+          kind: "write",
+          title:
+            action.action === "delete"
+              ? `Delete ${action.path}`
+              : `Move ${action.path} to ${action.destination}`,
+          detail: `A recovery copy will be saved first.\n\n${original.content.slice(0, 10000)}`,
+        },
+        signal,
+      );
+      signal.throwIfAborted();
+      if (!allowed) throw new Error("User rejected file operation.");
+      const source = await this.resolve(action.path);
+      if ((await this.read(action.path)).sha !== action.sha)
+        throw new Error("File changed while awaiting approval.");
+      await mkdir(this.recoveryDirectory!, { recursive: true, mode: 0o700 });
+      const recoveryPath = path.join(
+        this.recoveryDirectory!,
+        randomUUID() + ".json",
+      );
+      await writeFile(
+        recoveryPath,
+        JSON.stringify({
+          action: action.action,
+          project: this.directory,
+          path: action.path,
+          destination:
+            action.action === "move" ? action.destination : undefined,
+          sha: original.sha,
+          content: original.content,
+          at: new Date().toISOString(),
+        }),
+        { flag: "wx", mode: 0o600 },
+      );
+      if (action.action === "move") {
+        const destination = await this.resolve(action.destination, true);
+        await copyFile(source, destination, constants.COPYFILE_EXCL);
+        // Preserve both copies if an external editor raced the copy.
+        if (
+          (await this.read(action.path)).sha !== action.sha ||
+          (await this.read(action.destination)).sha !== action.sha
+        )
+          throw new Error(
+            "A file changed during the move; both paths were preserved. Inspect them before retrying.",
+          );
+      }
+      signal.throwIfAborted();
+      if ((await this.read(action.path)).sha !== action.sha)
+        throw new Error("File changed before removal; source preserved.");
+      await unlink(source);
+      return {
+        action: action.action,
+        path: action.path,
+        ...(action.action === "move"
+          ? { destination: action.destination, sha: original.sha }
+          : {}),
+        recoveryPath,
+      };
+    }
     if (action.action === "tree")
       return {
         directory: this.directory,

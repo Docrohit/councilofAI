@@ -369,3 +369,73 @@ test("terminal output cannot inject control sequences", () => {
   );
   assert.deepEqual(wrapTerminal("abcdefgh\n", 4), ["abcd", "efgh", ""]);
 });
+
+test("native moves and deletes require current hashes, approval and recoverable copies", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "council-file-ops-"));
+  try {
+    const projectDir = path.join(dir, "project"),
+      recovery = path.join(dir, "recovery");
+    mkdirSync(projectDir);
+    writeFileSync(path.join(projectDir, "source.txt"), "preserve me");
+    writeFileSync(path.join(projectDir, "existing.txt"), "keep target");
+    const p = new LocalProject(projectDir, async () => true, recovery),
+      read = await p.read("source.txt");
+    await assert.rejects(
+      p.execute(
+        {
+          action: "move",
+          path: "source.txt",
+          destination: "existing.txt",
+          sha: read.sha!,
+        },
+        signal(),
+      ),
+      /exists/,
+    );
+    await assert.rejects(
+      p.execute(
+        { action: "delete", path: "source.txt", sha: "stale" },
+        signal(),
+      ),
+      /changed/,
+    );
+    const denied = new LocalProject(projectDir, async () => false, recovery);
+    await assert.rejects(
+      denied.execute(
+        { action: "delete", path: "source.txt", sha: read.sha! },
+        signal(),
+      ),
+      /rejected/,
+    );
+    const moved = await p.execute(
+      {
+        action: "move",
+        path: "source.txt",
+        destination: "nested/moved.txt",
+        sha: read.sha!,
+      },
+      signal(),
+    );
+    assert.equal((await p.read("source.txt")).sha, null);
+    assert.equal((await p.read("nested/moved.txt")).content, "preserve me");
+    assert.equal(
+      JSON.parse(readFileSync(moved.recoveryPath, "utf8")).content,
+      "preserve me",
+    );
+    const removed = await p.execute(
+      { action: "delete", path: "nested/moved.txt", sha: read.sha! },
+      signal(),
+    );
+    assert.equal((await p.read("nested/moved.txt")).sha, null);
+    assert.equal(
+      JSON.parse(readFileSync(removed.recoveryPath, "utf8")).content,
+      "preserve me",
+    );
+    assert.equal(
+      readFileSync(path.join(projectDir, "existing.txt"), "utf8"),
+      "keep target",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

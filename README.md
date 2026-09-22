@@ -207,7 +207,7 @@ tools, use standalone Council in your local or server project directory. Details
 Normal sessions include a bounded `factor_integer` tool for positive integers up
 to 10^12. It computes prime factors, divisor count and a reconstructed product
 using exact integer arithmetic, then publishes the observed result to the board.
-It requires no shell or coding project. This is a specific arithmetic check, not
+The `calculate` tool evaluates bounded arithmetic expressions using exact rational numbers, and `solve_linear` handles up to eight equations/variables with exact substitution checks. These tools require no shell or coding project. This is a specific arithmetic check, not
 a general guarantee of mathematical correctness. Benchmark sessions disable it
 to preserve the existing comparison with an unaided single-model baseline.
 
@@ -215,7 +215,7 @@ Malformed action JSON is rejected with a field/format error sent back to the
 agent for correction. Rejected actions are not described as successfully
 published. Completion requires a work key and result; only the claim needs a
 description. Repeated discussion without recorded evidence triggers a request
-for a concrete check or blocker. Models may still make errors or fail to converge.
+for a concrete check or blocker, then an early qualified stop if it continues. Models may still make errors or fail to converge.
 
 The Answer tab contains the final answer or a qualified conclusion after the
 run ends. While running, it explains that no final answer is ready. Existing

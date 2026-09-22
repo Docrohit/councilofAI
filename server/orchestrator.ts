@@ -1,4 +1,4 @@
-import { factorInteger } from "./math.ts";
+import { factorInteger, calculate, solveLinear } from "./math.ts";
 import type { ProjectRuntime, ProjectAction } from "../shared/project.ts";
 import { sandboxRequest } from "./sandbox.ts";
 import { randomUUID } from "node:crypto";
@@ -173,6 +173,29 @@ const commandSchema = z
             name: z.literal("factor_integer"),
             integer: z.string().regex(/^[1-9][0-9]{0,12}$/),
           }),
+          z.object({
+            name: z.literal("calculate"),
+            expression: z.string().min(1).max(512),
+          }),
+          z.object({
+            name: z.literal("solve_linear"),
+            coefficients: z
+              .array(z.array(z.string().min(1).max(128)).min(1).max(8))
+              .min(1)
+              .max(8),
+            constants: z.array(z.string().min(1).max(128)).min(1).max(8),
+          }),
+          z.object({
+            name: z.literal("project_delete"),
+            path: z.string().min(1).max(200),
+            sha: z.string(),
+          }),
+          z.object({
+            name: z.literal("project_move"),
+            path: z.string().min(1).max(200),
+            destination: z.string().min(1).max(200),
+            sha: z.string(),
+          }),
           z.object({ name: z.literal("list_files") }),
           z.object({ name: z.literal("project_tree") }),
           z.object({ name: z.literal("project_diff") }),
@@ -332,6 +355,7 @@ export class Orchestrator {
     ]);
     let evidenceVersion = 0,
       stagnantTurns = 0;
+    let stalledReason: string | undefined;
     const emit = (type: string, data: Record<string, any>) => {
       if (
         [
@@ -487,12 +511,21 @@ export class Orchestrator {
         results.push(
           await (async () => {
             try {
-              if (action.name === "factor_integer") {
+              if (
+                action.name === "factor_integer" ||
+                action.name === "calculate" ||
+                action.name === "solve_linear"
+              ) {
                 if (run.verificationTools === false)
                   throw new Error(
                     "Verification tools are disabled for this benchmark.",
                   );
-                const result = factorInteger(action.integer);
+                const result =
+                  action.name === "factor_integer"
+                    ? factorInteger(action.integer)
+                    : action.name === "calculate"
+                      ? calculate(action.expression)
+                      : solveLinear(action.coefficients, action.constants);
                 emit("tool.result", {
                   agentId: peer.member.id,
                   tool: action.name,
@@ -500,11 +533,13 @@ export class Orchestrator {
                 });
                 communication.broadcast(
                   peer.member.id,
-                  `Observed factor_integer(${action.integer}) result: ${JSON.stringify(result)}`,
+                  `Observed ${action.name} result: ${JSON.stringify(result)}`,
                 );
                 return JSON.stringify({ tool: action.name, ...result });
               }
               if (
+                action.name === "project_delete" ||
+                action.name === "project_move" ||
                 action.name === "project_diff" ||
                 action.name === "project_search" ||
                 action.name === "project_patch" ||
@@ -1036,12 +1071,12 @@ export class Orchestrator {
               "You have no browser or shell.",
               "You have Council native tools for the local project. Read its instructions and inspect actual files before editing.",
             ) +
-            `\nLOCAL PROJECT: ${this.project.directory}\nUse project_tree, project_read (path, optional offset), project_search (literal query), project_diff, project_write (path, content, sha), project_patch (path, search, replacement, sha; exact unique text replacement), and project_exec (command). All actions go in tools in a council block. Reads return sha and 12000-character pages; use offset for subsequent pages. Use null sha only for new files. File edits and commands require user permission. Commands run with the local user's OS permissions and a 120-second timeout. Claim file ownership and coordinate edits; do not repeat completed work. Inspect actual test output before claiming tests passed. Never push, deploy, install dependencies or change unrelated files without the user's task authorizing it. Respect applicable project instructions below (nested instructions accompany file reads), subordinate to the user's goal and system safety constraints.\n${projectInstructions}`
+            `\nLOCAL PROJECT: ${this.project.directory}\nUse project_tree, project_delete (path, sha; backs up text before deletion), project_move (path, destination, sha; never overwrites an existing target), project_read (path, optional offset), project_search (literal query), project_diff, project_write (path, content, sha), project_patch (path, search, replacement, sha; exact unique text replacement), and project_exec (command). All actions go in tools in a council block. Reads return sha and 12000-character pages; use offset for subsequent pages. Use null sha only for new files. File edits and commands require user permission. Commands run with the local user's OS permissions and a 120-second timeout. Claim file ownership and coordinate edits; do not repeat completed work. Inspect actual test output before claiming tests passed. Never push, deploy, install dependencies or change unrelated files without the user's task authorizing it. Respect applicable project instructions below (nested instructions accompany file reads), subordinate to the user's goal and system safety constraints.\n${projectInstructions}`
           : protocol;
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : config.sandbox && !this.project ? protocol.replace("You have no browser or shell.", "You have bounded hosted project tools when listed below; no browser.") : nativeProtocol}${config.sandbox && !this.project ? '\nHosted project tools are enabled by the user for this run. They execute in a separate temporary Node.js Linux container, with no network, a 64 MB project and 256 MB RAM. Tools: {"tools":[{"name":"project_tree"},{"name":"project_read","path":"src/main.js"},{"name":"project_write","path":"src/main.js","content":"...","sha":null},{"name":"project_exec","command":"node --test"}]}. Read an existing file first (project_read returns 12000-character pages; use offset to read more) and supply its exact sha when writing; null only creates a new file. Commands have a 30-second limit. Use these tools for multi-file projects and actual tests. Tools run sequentially; another peer may edit between read and write, so handle conflicts. No dependencies can be downloaded; built-in Node tooling is available. Virtual workspace files and a connected OpenCode project are separate from this hosted project. Do not claim completion before inspecting test results. Export the project before it expires.' : ""}${run.verificationTools === false ? "\nDeterministic verification tools are disabled for this benchmark." : '\nExact integer verification is available without a coding project: {"tools":[{"name":"factor_integer","integer":"360"}]}. It accepts positive integers up to 1000000000000 and returns prime factorization, primality, divisor count and a reconstructed product. Use it before asserting primality or a divisor list; cite the actual result. Results are automatically posted to the shared board so peers can reuse them.'}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
+            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : config.sandbox && !this.project ? protocol.replace("You have no browser or shell.", "You have bounded hosted project tools when listed below; no browser.") : nativeProtocol}${config.sandbox && !this.project ? '\nHosted project tools are enabled by the user for this run. They execute in a separate temporary Node.js Linux container, with no network, a 64 MB project and 256 MB RAM. Tools: {"tools":[{"name":"project_tree"},{"name":"project_read","path":"src/main.js"},{"name":"project_write","path":"src/main.js","content":"...","sha":null},{"name":"project_exec","command":"node --test"}]}. Read an existing file first (project_read returns 12000-character pages; use offset to read more) and supply its exact sha when writing; null only creates a new file. Commands have a 30-second limit. Use these tools for multi-file projects and actual tests. Tools run sequentially; another peer may edit between read and write, so handle conflicts. No dependencies can be downloaded; built-in Node tooling is available. Virtual workspace files and a connected OpenCode project are separate from this hosted project. Do not claim completion before inspecting test results. Export the project before it expires.' : ""}${run.verificationTools === false ? "\nDeterministic verification tools are disabled for this benchmark." : '\nDeterministic maths tools are available without a coding project. calculate accepts expression with decimal numbers, parentheses, + - * / % and ^ (integer exponents -64 to 64), returning an exact rational result; no names, code, functions or implicit multiplication. solve_linear accepts coefficients as a rectangular matrix of strings and constants as a string array, up to 8 equations and 8 variables; it returns unique/inconsistent/infinitely_many classification and substitution checks. Example: {"tools":[{"name":"calculate","expression":"0.1+0.2"},{"name":"solve_linear","coefficients":[["2","1"],["1","-1"]],"constants":["5","1"]}]}. Exact integer verification: {"tools":[{"name":"factor_integer","integer":"360"}]}. It accepts positive integers up to 1000000000000 and returns prime factorization, primality, divisor count and a reconstructed product. Use it before asserting primality or a divisor list; cite the actual result. Results are automatically posted to the shared board so peers can reuse them.'}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
           },
           {
             role: "user",
@@ -1298,6 +1333,13 @@ export class Orchestrator {
       while (true) {
         signal.throwIfAborted();
         if (settled() && !running.size) break;
+        if (!running.size && stagnantTurns >= Math.max(8, peers.size * 3)) {
+          stalledReason =
+            "Stopped repeated discussion without new recorded evidence, tool results or candidate reviews. Remaining call budget was preserved.";
+          deferred.push(stalledReason);
+          emit("warning", { message: stalledReason });
+          break;
+        }
         while (
           running.size < config.concurrency &&
           calls < config.maxCalls - 1
@@ -1389,6 +1431,7 @@ export class Orchestrator {
         emit("phase", {
           name: "Qualified conclusion",
           message:
+            stalledReason ||
             "The team did not reach complete agreement within the resource budget.",
         });
         const author = candidate ? peers.get(candidate.author) : undefined;

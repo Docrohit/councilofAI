@@ -10,6 +10,8 @@ export type ProjectAction =
       replacement: string;
       sha: string;
     }
+  | { action: "delete"; path: string; sha: string }
+  | { action: "move"; path: string; destination: string; sha: string }
   | { action: "exec"; command: string };
 export interface ProjectRuntime {
   directory: string;

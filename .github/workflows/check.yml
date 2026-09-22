@@ -66,6 +66,8 @@ jobs:
           scp -i ~/.ssh/council_deploy -o BatchMode=yes council-release.tar.gz "root@$SERVER_HOST:$archive"
           tar -xzf council-release.tar.gz deploy/deploy.sh
           ssh -i ~/.ssh/council_deploy -o BatchMode=yes "root@$SERVER_HOST" "PUBLIC_IPV4='$SERVER_HOST' bash -s -- '$archive' '$GITHUB_SHA'" < deploy/deploy.sh
+      - name: Verify public HTTPS health
+        run: curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors --max-time 15 https://councilofai.nftforger.com/api/health
       - name: Remove deployment credentials
         if: always()
         run: rm -f ~/.ssh/council_deploy

@@ -106,6 +106,8 @@ systemctl reload nginx
 install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
 printf '#!/bin/sh\nnginx -t && systemctl reload nginx\n' > /etc/letsencrypt/renewal-hooks/deploy/councilofai-reload
 chmod 755 /etc/letsencrypt/renewal-hooks/deploy/councilofai-reload
-curl --fail --silent --show-error --resolve councilofai.nftforger.com:443:127.0.0.1 https://councilofai.nftforger.com/api/health
+# Reload returns before all new workers are ready. Retry with certificate checks
+# intact so the retiring worker's previous default certificate cannot fail a release.
+curl --fail --silent --show-error --retry 10 --retry-delay 1 --retry-all-errors --max-time 10 --resolve councilofai.nftforger.com:443:127.0.0.1 https://councilofai.nftforger.com/api/health
 python3 deploy/backup.py
 printf '\nCouncil deployed: %s\n' "$revision"

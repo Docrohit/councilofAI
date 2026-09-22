@@ -61,6 +61,7 @@ test("OpenCode project pinning, persistent peer sessions, permission and questio
       const message = {
         info: {
           id: `m${turn}`,
+          parentID: `u${turn}`,
           role: "assistant",
           tokens: { input: 10, output: 4 },
         },
@@ -134,7 +135,8 @@ test("OpenCode project pinning, persistent peer sessions, permission and questio
       finish?.();
       return reply(true);
     }
-    if (url.pathname === "/session/s1/diff")
+    if (url.pathname === "/session/s1/diff") {
+      assert.equal(url.searchParams.get("messageID"), `u${turn}`);
       return reply([
         {
           file: "math.ts",
@@ -144,6 +146,7 @@ test("OpenCode project pinning, persistent peer sessions, permission and questio
           deletions: 1,
         },
       ]);
+    }
     if (url.pathname.endsWith("/abort")) {
       finish?.();
       return reply(true);

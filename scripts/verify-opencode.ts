@@ -8,13 +8,16 @@ import {
   readFileSync,
   rmSync,
   mkdirSync,
+  realpathSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import { OpenCodeWorker } from "../cli/opencode.ts";
-const root = mkdtempSync(path.join(tmpdir(), "council-native-check-"));
+const root = realpathSync(
+  mkdtempSync(path.join(tmpdir(), "council-native-check-")),
+);
 const project = path.join(root, "project");
 mkdirSync(project);
 writeFileSync(
@@ -26,6 +29,18 @@ writeFileSync(
   `import test from 'node:test'; import assert from 'node:assert/strict'; import {square} from './calc.js'; test('square',()=>{assert.equal(square(4),16);assert.equal(square(-3),9);});`,
 );
 execFileSync("git", ["init", "-q", project]);
+execFileSync("git", ["-C", project, "add", "."]);
+execFileSync("git", [
+  "-C",
+  project,
+  "-c",
+  "user.name=Council Test",
+  "-c",
+  "user.email=fixture@example.test",
+  "commit",
+  "-qm",
+  "Acceptance fixture",
+]);
 let calls = 0;
 const model = createServer(async (req, res) => {
   let text = "";
@@ -159,7 +174,7 @@ try {
   const worker = new OpenCodeWorker({
     url: `http://127.0.0.1:${port}`,
     directory: project,
-    nativePermissions: true,
+    nativePermissions: false,
   });
   let healthy = false;
   for (let i = 0; i < 100; i++) {
@@ -204,6 +219,12 @@ try {
   )) {
     if (c.activity) {
       activities.push(c.activity);
+      if (c.activity.kind === "permission")
+        await worker.reply({
+          id: c.activity.id,
+          kind: "permission",
+          reply: "once",
+        });
       console.log(c.activity.kind, c.activity.title, c.activity.status || "");
     }
     if (c.type === "text") answer += c.text;
@@ -228,6 +249,14 @@ try {
     "Missing actual test output",
   );
   assert.match(answer, /Implemented square/);
+  assert.ok(
+    activities.filter((a) => a.kind === "permission").length >= 2,
+    "Native write and bash permissions were not exercised",
+  );
+  assert.ok(
+    activities.some((a) => a.kind === "diff" && a.detail.includes("calc.js")),
+    "Missing native session diff",
+  );
   console.log(
     JSON.stringify({
       result: "PASS",
@@ -236,6 +265,8 @@ try {
       }).trim(),
       nativeModelCalls: calls,
       verified: [
+        "native permission replies",
+        "native session diff",
         "real file edit",
         "real shell test",
         "tool transcript",

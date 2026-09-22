@@ -403,12 +403,23 @@ export class OpenCodeWorker {
         );
       if (![...seenText.values()].some((t) => t.trim()))
         throw new Error("OpenCode returned no public answer text.");
-      const diff = await this.api(
-        route + "/diff",
-        "GET",
-        undefined,
-        request.signal,
-      );
+      const diffRoute =
+        route +
+        "/diff" +
+        (response?.info?.parentID
+          ? "?messageID=" + encodeURIComponent(response.info.parentID)
+          : "");
+      let diff = await this.api(diffRoute, "GET", undefined, request.signal);
+      // OpenCode computes session diffs asynchronously after finishing a turn.
+      // Give a completed edit a short bounded window to publish its snapshot.
+      for (
+        let retry = 0;
+        retry < 4 && !diff?.length && seenTools.size;
+        retry++
+      ) {
+        await delay(300, undefined, { signal: request.signal });
+        diff = await this.api(diffRoute, "GET", undefined, request.signal);
+      }
       if (diff?.length)
         yield {
           type: "coding",

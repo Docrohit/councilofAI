@@ -7,7 +7,7 @@ project.mkdir()
 (project / 'sample.txt').write_text('original')
 master, slave = pty.openpty()
 env = dict(os.environ, COUNCIL_CONFIG_DIR=str(folder / 'config'), COUNCIL_DATA_HOME=str(folder / 'data'), TERM='xterm-256color')
-process = subprocess.Popen([shutil.which('node'), str(root / 'bin/council.mjs')], cwd=project, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+process = subprocess.Popen([shutil.which('node'), str(root / 'bin/council.mjs'), '--agents', '5', '--max-calls', '40'], cwd=project, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
 os.close(slave)
 seen = b''
 def wait_for(text, timeout=10):
@@ -39,10 +39,21 @@ try:
     assert (project / 'sample.txt').read_text() == 'updated original'
     send('\x1b')
     wait_for('Editor closed')
+    send('/connect fixture compatible unused\r')
+    wait_for('Saved fixture')
+    assert b'5 agents' in seen and b'0/40 calls' in seen
+    send('/budget 60\r')
+    wait_for('budget updated to 60')
+    send('/use fixture\r')
+    wait_for('Model pool updated')
+    assert b'0/60 calls' in seen
+    send('/agents 6\r')
+    wait_for('Agent count updated')
+    assert b'6 agents' in seen and b'0/60 calls' in seen
     send('/quit\r')
     wait_for('\x1b[?1049l')
     assert process.wait(timeout=10) == 0
-    print('Verified actual standalone TUI: launch in current directory, built-in editor, permission prompt, real file save, terminal exit. No OpenCode or model calls.')
+    print('Verified actual standalone TUI: launch in current directory, built-in editor, permission prompt, real file save, model selection and budget preservation, terminal exit. No OpenCode or model calls.')
 finally:
     if process.poll() is None:
         os.killpg(process.pid, signal.SIGKILL)

@@ -163,12 +163,28 @@ export async function startTui(options: TuiOptions) {
         draw();
       }),
   );
+  function configure(
+    ids?: string[],
+    count = config?.members.length ?? options.agents ?? 3,
+  ) {
+    const next = council.config(ids, count);
+    if (config) {
+      const { members, providerIds } = next;
+      config = { ...config, members, providerIds };
+      config.maxCalls = Math.max(config.maxCalls, count + 2);
+      if (config.maxAgents !== null)
+        config.maxAgents = Math.max(config.maxAgents, count);
+    } else {
+      config = next;
+      if (options.maxCalls !== undefined) config.maxCalls = options.maxCalls;
+      if (options.concurrency !== undefined)
+        config.concurrency = options.concurrency;
+      if (options.maxAgents !== undefined) config.maxAgents = options.maxAgents;
+      if (options.maxDepth !== undefined) config.maxDepth = options.maxDepth;
+    }
+  }
   try {
-    config = council.config(options.ids, options.agents || 3);
-    if (options.maxCalls) config.maxCalls = options.maxCalls;
-    if (options.concurrency) config.concurrency = options.concurrency;
-    if (options.maxAgents !== undefined) config.maxAgents = options.maxAgents;
-    if (options.maxDepth !== undefined) config.maxDepth = options.maxDepth;
+    configure(options.ids);
   } catch (e) {
     notice = (e as Error).message;
   }
@@ -381,7 +397,7 @@ export async function startTui(options: TuiOptions) {
         baseUrl: url || defaults.url,
         keyEnv: keyEnv || defaults.keyEnv,
       });
-      config = council.config(undefined, config?.members.length || 3);
+      configure();
       notice = `Saved ${id}. ${keyEnv || defaults.keyEnv ? `Key source: ${keyEnv || defaults.keyEnv}. Restart Council after exporting it.` : "No API key required by this configuration."}`;
       return;
     }
@@ -398,12 +414,12 @@ export async function startTui(options: TuiOptions) {
       return;
     }
     if (cmd === "use") {
-      config = council.config(arg.split(","), config?.members.length || 3);
+      configure(arg.split(","));
       notice = "Model pool updated.";
       return;
     }
     if (cmd === "agents") {
-      config = council.config(config?.providerIds, Number(arg));
+      configure(config?.providerIds, Number(arg));
       notice = "Agent count updated.";
       return;
     }
@@ -416,6 +432,7 @@ export async function startTui(options: TuiOptions) {
         throw new Error(`Choose ${min}–${max}.`);
       if (cmd === "budget") config.maxCalls = n;
       else config.concurrency = n;
+      notice = `${cmd} updated to ${n}.`;
       return;
     }
     if (cmd === "limits") {

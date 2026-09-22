@@ -19,3 +19,7 @@ Provider implementation references:
 - Claude streaming: https://platform.claude.com/docs/en/build-with-claude/streaming
 - Z.ai API setup: https://docs.z.ai/guides/overview/quick-start
 - vLLM OpenAI-compatible serving: https://docs.vllm.ai/en/latest/serving/openai_compatible_server/
+
+## Native coding engine integration
+
+The optional outbound coding worker now uses the upstream session, message, permission, question, path and diff APIs. Inspected generated v2 SDK types and native permission/session implementations at the same pinned revision. Council keeps peer coordination while OpenCode performs real project tools. The installed 1.18.31 runtime was exercised with a local model fixture: a real file write and Node shell test succeeded. Native TUI access is delegated to `opencode attach`; the Council web editor/PTY has not been ported. See [Coding](CODING.md) for exact availability and limits.

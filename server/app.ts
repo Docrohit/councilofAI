@@ -43,6 +43,7 @@ const providerSchema = z.object({
     "anthropic",
     "glm",
     "compatible",
+    "opencode",
     "demo",
   ]),
   baseUrl: z.string().max(500),
@@ -323,11 +324,12 @@ export function createApp(directory: string, production = false) {
       return;
     }
     const data = providerSchema.parse(req.body);
+    if (data.kind === "opencode") data.transport = "bridge";
     if (data.kind !== "demo" && data.transport === "direct")
       data.baseUrl = validateEndpoint(data.baseUrl);
     if (
       data.transport === "bridge" &&
-      !["ollama", "vllm", "compatible"].includes(data.kind)
+      !["ollama", "vllm", "compatible", "opencode"].includes(data.kind)
     ) {
       res.status(400).json({
         error: "Local bridge supports Ollama, vLLM, and compatible endpoints.",
@@ -356,11 +358,12 @@ export function createApp(directory: string, production = false) {
       return;
     }
     const data = providerSchema.parse(req.body);
+    if (data.kind === "opencode") data.transport = "bridge";
     if (data.kind !== "demo" && data.transport === "direct")
       data.baseUrl = validateEndpoint(data.baseUrl);
     if (
       data.transport === "bridge" &&
-      !["ollama", "vllm", "compatible"].includes(data.kind)
+      !["ollama", "vllm", "compatible", "opencode"].includes(data.kind)
     ) {
       res.status(400).json({ error: "Unsupported bridge provider." });
       return;
@@ -442,7 +445,10 @@ export function createApp(directory: string, production = false) {
     const selected = [...data.config.providerIds, data.baselineProviderId];
     if (
       selected.some(
-        (id) => !providers.some((p) => p.id === id && p.kind !== "demo"),
+        (id) =>
+          !providers.some(
+            (p) => p.id === id && p.kind !== "demo" && p.kind !== "opencode",
+          ),
       ) ||
       data.taskIds.some((id) => !benchmarkSuite.some((t) => t.id === id)) ||
       data.config.members.some(
@@ -456,7 +462,7 @@ export function createApp(directory: string, production = false) {
     ) {
       res.status(400).json({
         error:
-          "Choose valid real model connections, agents, tasks, and budgets. Scripted demo scores would be misleading.",
+          "Choose valid real model connections, agents, tasks, and budgets. Scripted demos and coding runtimes are excluded from model-only benchmarks.",
       });
       return;
     }
@@ -764,22 +770,86 @@ export function createApp(directory: string, production = false) {
         chunks: z
           .array(
             z.object({
-              type: z.enum(["text", "reasoning", "usage"]),
+              type: z.enum(["text", "reasoning", "usage", "coding"]),
               text: z.string().max(8000).optional(),
               input: z.number().nonnegative().optional(),
               output: z.number().nonnegative().optional(),
+              activity: z
+                .object({
+                  kind: z.enum([
+                    "session",
+                    "tool",
+                    "diff",
+                    "permission",
+                    "question",
+                  ]),
+                  sessionId: z.string().min(1).max(200),
+                  id: z.string().min(1).max(200),
+                  title: z.string().max(500),
+                  detail: z.string().max(12000),
+                  status: z.string().max(80).optional(),
+                  questions: z
+                    .array(
+                      z.object({
+                        question: z.string().max(2000),
+                        options: z.array(z.string().max(500)).max(20),
+                        multiple: z.boolean().optional(),
+                      }),
+                    )
+                    .max(10)
+                    .optional(),
+                })
+                .optional(),
             }),
           )
           .max(50)
           .optional(),
         done: z.boolean().optional(),
         error: z.string().max(500).optional(),
+        acknowledged: z.array(z.string().max(200)).max(50).optional(),
       })
       .parse(req.body);
     if (!engine.bridge.push(userOf(res).id, req.params.id as string, data)) {
       res.status(410).json({ error: "Job ended or is unavailable." });
       return;
     }
+    res.json({
+      ok: true,
+      replies: engine.bridge.controls(userOf(res).id, req.params.id as string),
+    });
+  });
+  app.post("/api/coding/jobs/:id/reply", (req, res) => {
+    const reply = z
+      .object({
+        id: z.string().min(1).max(200),
+        kind: z.enum(["permission", "question"]),
+        reply: z.enum(["once", "reject"]),
+        answers: z
+          .array(z.array(z.string().max(2000)).max(20))
+          .max(10)
+          .optional(),
+      })
+      .parse(req.body);
+    const result = engine.bridge.reply(
+      userOf(res).id,
+      req.params.id as string,
+      reply,
+    );
+    if (!result) {
+      res
+        .status(409)
+        .json({
+          error:
+            "This request has ended, was answered, or belongs to another account.",
+        });
+      return;
+    }
+    if (result.context)
+      store.event(result.context.runId, "coding.reply", {
+        jobId: req.params.id,
+        requestId: reply.id,
+        reply: reply.reply,
+      });
     res.json({ ok: true });
   });
   app.use("/api", (_req, res) =>

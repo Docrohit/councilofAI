@@ -661,6 +661,7 @@ export class Orchestrator {
         seenBlocks = 0;
       let lastFlush = Date.now();
       let inputTokens: number | undefined, outputTokens: number | undefined;
+      const codingEvidence: string[] = [];
       const flush = () => {
         if (pending) emit("turn.delta", { turnId, text: pending });
         if (reasoningPending)
@@ -673,7 +674,7 @@ export class Orchestrator {
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `${protocol}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
+            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : protocol}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
           },
           {
             role: "user",
@@ -683,6 +684,7 @@ export class Orchestrator {
         const request: CompletionRequest = {
           messages,
           maxTokens: config.maxOutputTokens,
+          context: { runId: run.id, agentId: peer.member.id },
           signal: AbortSignal.any([signal, AbortSignal.timeout(240_000)]),
         };
         const stream =
@@ -692,7 +694,9 @@ export class Orchestrator {
         let total = 0;
         for await (const chunk of stream) {
           signal.throwIfAborted();
-          total += chunk.text?.length || 0;
+          total +=
+            (chunk.text?.length || 0) +
+            (chunk.activity ? JSON.stringify(chunk.activity).length : 0);
           if (total > 240_000)
             throw new Error("Provider output exceeded stream limit.");
           if (chunk.type === "text") {
@@ -721,6 +725,22 @@ export class Orchestrator {
               }
             }
           }
+          if (chunk.type === "coding" && chunk.activity) {
+            emit("coding.activity", {
+              agentId: peer.member.id,
+              turnId,
+              jobId: chunk.jobId,
+              ...chunk.activity,
+            });
+            if (
+              chunk.activity.kind === "tool" &&
+              ["completed", "error"].includes(chunk.activity.status || "")
+            ) {
+              codingEvidence.push(
+                `${chunk.activity.title}: ${chunk.activity.detail.slice(-1600)}`,
+              );
+            }
+          }
           if (chunk.type === "reasoning") reasoningPending += chunk.text || "";
           if (chunk.type === "usage") {
             inputTokens = chunk.input ?? inputTokens;
@@ -738,7 +758,11 @@ export class Orchestrator {
             "Model returned no answer text. Increase the output limit or disable unsupported reasoning.",
           );
         const parsed = parseResponse(output);
-        peer.latest = parsed.text || "Published team actions.";
+        peer.latest =
+          (parsed.text || "Published team actions.") +
+          (codingEvidence.length
+            ? "\nObserved coding tools:\n" + codingEvidence.slice(-5).join("\n")
+            : "");
         peer.successful++;
         peer.failures = 0;
         failedProviders.delete(provider.id);

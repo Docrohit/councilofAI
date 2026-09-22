@@ -1,5 +1,12 @@
 export type ProviderKind =
-  "ollama" | "vllm" | "openai" | "anthropic" | "glm" | "compatible" | "demo";
+  | "ollama"
+  | "vllm"
+  | "openai"
+  | "anthropic"
+  | "glm"
+  | "compatible"
+  | "opencode"
+  | "demo";
 export interface Provider {
   id: string;
   name: string;
@@ -79,9 +86,26 @@ export interface ChatMessage {
   content: string;
 }
 export interface Chunk {
-  type: "text" | "reasoning" | "usage";
+  type: "text" | "reasoning" | "usage" | "coding";
   text?: string;
   input?: number;
   output?: number;
+  activity?: CodingActivity;
+  jobId?: string;
+}
+export interface CodingActivity {
+  kind: "session" | "tool" | "diff" | "permission" | "question";
+  sessionId: string;
+  id: string;
+  title: string;
+  detail: string;
+  status?: string;
+  questions?: { question: string; options: string[]; multiple?: boolean }[];
+}
+export interface CodingReply {
+  id: string;
+  kind: "permission" | "question";
+  reply: "once" | "reject";
+  answers?: string[][];
 }
 export const roles = ["Architect", "Researcher", "Critic"];

@@ -71,3 +71,7 @@ The current deployment is one Node process. The active scheduler and bridge queu
 ## Verification boundaries
 
 Unit/integration/browser tests use scripted or protocol fixture outputs. They can prove routing, state transitions, input validation and rendered interaction, not that real models understand the goal or resolve a substantive disagreement correctly. A useful next acceptance exercise is one small local model with five agents, then the same fixed task with three different model families, comparing final claims to independent ground truth.
+
+## Native coding runtime
+
+`cli/opencode.ts` pins a loopback runtime and a locally chosen project, maps each run/peer to a persistent native session, forwards public messages and bounded tool/diff activity, and aborts owned sessions on cancellation. The hosted bridge routes permission/question responses only to active jobs belonging to the signed-in user. Responses remain queued until acknowledged. OpenCode credentials stay local. Native inner-loop model calls are distinct from Council turn budgets. See [Coding](CODING.md) for isolation, concurrent-edit and recovery limits.

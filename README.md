@@ -2,7 +2,7 @@
 
 [![Check](https://github.com/Docrohit/councilofAI/actions/workflows/check.yml/badge.svg)](https://github.com/Docrohit/councilofAI/actions/workflows/check.yml)
 
-**A team of models and agents working toward one shared goal.**
+**A team of coding models and agents working toward one shared goal.**
 
 Council is a personal, self-hostable multi-LLM orchestration project with a mobile-friendly web workspace and developer CLI. Agents are peers: they choose roles, talk directly, ask one another to investigate, invite specialists, establish shared evidence, and challenge proposed answers. There is no permanent coordinator.
 
@@ -30,6 +30,10 @@ npm start
 ```
 
 The project uses React, TypeScript, Express, SQLite, and server-sent events. Its default configuration binds to loopback. All state lives in `.council/`, which is excluded from Git. A local encryption key is created automatically; back it up with the database.
+
+## Code with real project tools
+
+Connect an **OpenCode coding runtime** from Connections, then launch `npm run cli -- coding-worker --provider CONNECTION_ID --url http://127.0.0.1:4096 --directory /your/project`. Peers use the actual OpenCode engine for files, shell commands and tests; Council streams tool results and asks for permissions in the discussion. Use `npm run cli -- code --url http://127.0.0.1:4096 --directory /your/project` for the full native terminal UI. See [Coding setup and current parity](docs/CODING.md) for model configuration, permissions, budgets and the RunPod handoff.
 
 ## Model count and agent count are separate
 
@@ -132,7 +136,7 @@ Tokens last 30 days, are hashed on the server, and are stored with mode `0600` u
 
 Agents can list/read the account’s virtual text files and propose changes. Proposed writes show the original and proposed content for review. Accepting checks the original version to prevent stale overwrites. Files belong to a Council account and are stored in SQLite; they are not arbitrary files on the server or visitor’s computer.
 
-This version **does not execute shell commands, browse the web, control a computer, connect MCP tools, or run a full coding sandbox**. A team can reason over supplied context, produce code/text artifacts, and revise them through proposed files. The next tool-execution layer should use isolated per-user sandboxes. Do not describe this alpha as feature-parity with OpenCode’s coding agent.
+For real projects, the optional **OpenCode worker** executes native coding tools on the connected project computer. It exposes tool activity, permission requests, questions and available diffs in Council. The public application server does not execute project code. Native LSP/MCP/plugins require normal OpenCode configuration. The full native TUI is available through the CLI; Council’s web editor, terminal and sandbox experience is not yet at full OpenCode parity. See [Coding](docs/CODING.md).
 
 ## Verification
 

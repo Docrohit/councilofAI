@@ -2436,3 +2436,19 @@ fieldset {
     grid-template-columns: 1fr;
   }
 }
+
+.coding-question {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+.coding-question textarea {
+  min-height: 70px;
+  width: 100%;
+}
+.coding-card pre {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

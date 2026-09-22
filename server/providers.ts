@@ -52,6 +52,7 @@ export interface CompletionRequest {
   messages: ChatMessage[];
   maxTokens: number;
   signal: AbortSignal;
+  context?: { runId: string; agentId: string };
 }
 
 // Provider errors are returned only to the owning account. Keep useful diagnostics,
@@ -116,6 +117,10 @@ export async function* complete(
   provider: Provider,
   request: CompletionRequest,
 ): AsyncGenerator<Chunk> {
+  if (provider.kind === "opencode")
+    throw new Error(
+      "OpenCode requires a coding-worker running in your project.",
+    );
   if (provider.kind === "demo") {
     yield* demo(request);
     return;

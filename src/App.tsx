@@ -382,6 +382,7 @@ function activity(events: CouncilEvent[]) {
         "budget.limit",
         "warning",
         "tool.result",
+        "coding.activity",
         "tool.error",
         "file.proposal",
         "file.resolved",
@@ -399,16 +400,138 @@ function activity(events: CouncilEvent[]) {
   }
   return { turns, items };
 }
+function CodingCard({
+  event,
+  who,
+  answered,
+  active,
+}: {
+  event: CouncilEvent;
+  who: string;
+  answered: boolean;
+  active: boolean;
+}) {
+  const d = event.data;
+  const [sent, setSent] = useState(false),
+    [error, setError] = useState("");
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState(false);
+  const pending = ["permission", "question"].includes(d.kind);
+  async function reply(allow: boolean) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/coding/jobs/${encodeURIComponent(d.jobId)}/reply`, "POST", {
+        id: d.id,
+        kind: d.kind,
+        reply: allow ? "once" : "reject",
+        ...(d.kind === "question" && allow
+          ? {
+              answers: (d.questions || []).map((_: unknown, i: number) =>
+                (answers[i] || "")
+                  .split("\n")
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              ),
+            }
+          : {}),
+      });
+      setSent(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <details className="candidate-card coding-card" open={pending}>
+      <summary>
+        <Terminal size={16} />
+        <b>{who}</b> · {d.title}{" "}
+        <span className="tiny-tag">
+          {d.kind} · {d.status || ""}
+        </span>
+      </summary>
+      <pre>{d.detail}</pre>
+      <span className="field-help">OpenCode session {d.sessionId}</span>
+      {pending &&
+        (answered || sent ? (
+          <p>Response sent.</p>
+        ) : !active ? (
+          <p>
+            This run has ended. Continue the session to request new tool
+            actions.
+          </p>
+        ) : (
+          <div>
+            {d.kind === "question" &&
+              (d.questions || []).map((q: any, i: number) => (
+                <label className="coding-question" key={i}>
+                  {q.question}
+                  <span className="field-help">
+                    {q.options.join(" · ")}
+                    {q.multiple ? " — enter one answer per line" : ""}
+                  </span>
+                  <textarea
+                    aria-label={q.question}
+                    value={answers[i] || ""}
+                    onChange={(e) =>
+                      setAnswers({ ...answers, [i]: e.target.value })
+                    }
+                  />
+                </label>
+              ))}
+            <div className="modal-actions">
+              <button
+                className="quiet-button"
+                disabled={busy}
+                onClick={() => reply(false)}
+              >
+                Reject
+              </button>
+              <button
+                className="primary"
+                disabled={
+                  busy ||
+                  (d.kind === "question" &&
+                    (d.questions || []).some(
+                      (_: unknown, i: number) => !answers[i]?.trim(),
+                    ))
+                }
+                onClick={() => reply(true)}
+              >
+                {d.kind === "permission" ? "Allow once" : "Send answer"}
+              </button>
+            </div>
+          </div>
+        ))}
+      {error && <p className="error">{error}</p>}
+    </details>
+  );
+}
 function EventCard({
   event,
   members,
+  codingAnswered = false,
+  active = false,
 }: {
   event: CouncilEvent;
   members: Member[];
+  codingAnswered?: boolean;
+  active?: boolean;
 }) {
   const d = event.data;
   const who = (id: string) =>
     members.find((m) => m.id === id)?.name || (id === "all" ? "Everyone" : id);
+  if (event.type === "coding.activity")
+    return (
+      <CodingCard
+        event={event}
+        who={who(d.agentId)}
+        answered={codingAnswered}
+        active={active}
+      />
+    );
   if (event.type === "agent.assessment")
     return (
       <div className="review-event">
@@ -635,7 +758,9 @@ function TurnCard({ turn, index }: { turn: Turn; index: number }) {
           ) : (
             <span className="muted thinking-label">
               {turn.done
-                ? "Published team actions."
+                ? turn.error
+                  ? "No completed contribution."
+                  : "Published team actions."
                 : "Working on the shared goal…"}
             </span>
           )}
@@ -1211,6 +1336,13 @@ export default function App() {
                             key={item.event.id}
                             event={item.event}
                             members={members}
+                            active={active}
+                            codingAnswered={events.some(
+                              (e) =>
+                                e.type === "coding.reply" &&
+                                e.data.jobId === item.event.data.jobId &&
+                                e.data.requestId === item.event.data.id,
+                            )}
                           />
                         ),
                       )
@@ -1522,6 +1654,11 @@ const presets: Record<
     model: "",
     label: "OpenAI-compatible",
   },
+  opencode: {
+    url: "http://127.0.0.1:4096",
+    model: "",
+    label: "OpenCode coding runtime",
+  },
   demo: { url: "", model: "scripted-demo", label: "Scripted demo" },
 };
 function Connections({
@@ -1668,7 +1805,9 @@ function Connections({
                 value={kind}
                 onChange={(e) => {
                   setKind(e.target.value as ProviderKind);
-                  setTransport("direct");
+                  setTransport(
+                    e.target.value === "opencode" ? "bridge" : "direct",
+                  );
                 }}
               >
                 {Object.entries(presets).map(([value, p]) => (
@@ -1703,14 +1842,17 @@ function Connections({
               Connection type
               <select
                 value={transport}
+                disabled={kind === "opencode"}
                 onChange={(e) =>
                   setTransport(e.target.value as "direct" | "bridge")
                 }
               >
-                <option value="direct">Direct from this server</option>
-                {["ollama", "vllm", "compatible"].includes(kind) && (
-                  <option value="bridge">Bridge from my computer</option>
+                {kind !== "opencode" && (
+                  <option value="direct">Direct from this server</option>
                 )}
+                {["ollama", "vllm", "compatible", "opencode"].includes(
+                  kind,
+                ) && <option value="bridge">Bridge from my computer</option>}
               </select>
             </label>
             <label className="full">
@@ -1758,15 +1900,28 @@ function Connections({
               not support it.
             </p>
           )}
+          {kind === "opencode" && (
+            <div className="notice">
+              Real coding in your chosen project, using OpenCode’s file,
+              terminal, LSP and configured MCP tools. Enter a model in{" "}
+              <code>provider/model</code> format from{" "}
+              <code>opencode models</code>. Model credentials stay in OpenCode.
+              Start <code>opencode serve --hostname 127.0.0.1 --port 4096</code>{" "}
+              in the project, then connect the worker. Tool output is shared
+              with this Council account; tool permissions appear in the
+              discussion.
+            </div>
+          )}
           {transport === "bridge" && (
             <div className="notice">
               Save this connection, then run{" "}
               <code>
-                npm run cli -- worker --provider CONNECTION_ID --url
-                http://127.0.0.1:11434
+                {kind === "opencode"
+                  ? "npm run cli -- coding-worker --provider CONNECTION_ID --url http://127.0.0.1:4096 --directory /absolute/project"
+                  : "npm run cli -- worker --provider CONNECTION_ID --url http://127.0.0.1:11434"}
               </code>{" "}
-              on your computer. The worker makes outbound requests; no public
-              Ollama port is needed. Connection ID:{" "}
+              on the project/model computer. The worker makes outbound requests;
+              no public runtime port is needed. Connection ID:{" "}
               <code>
                 {edit?.id || "shown after saving with CLI connections"}
               </code>
@@ -2088,6 +2243,18 @@ function TeamSettings({
           concurrency lets cloud or sufficiently provisioned local models work
           simultaneously.
         </p>
+        {providers.some(
+          (p) => p.kind === "opencode" && value.providerIds.includes(p.id),
+        ) && (
+          <div className="notice">
+            OpenCode connections use real project tools. Start with one
+            concurrent call for a shared working tree. Here, the call limit
+            counts Council turns; each OpenCode turn can make multiple native
+            model calls. Set native step and output limits in OpenCode.
+            Permission wait time is included in the four-minute coding turn
+            timeout.
+          </div>
+        )}
       </fieldset>
       <div className="modal-actions">
         <button className="quiet-button" onClick={close}>
@@ -2299,6 +2466,23 @@ function CliModal({ close }: { close: () => void }) {
         Create a bridge connection first. The worker reaches your local model
         and forwards its stream to your private session.
       </p>
+      <h3>Connect a coding project</h3>
+      <pre>
+        {
+          "npm run cli -- coding-worker --provider CONNECTION_ID\n  --url http://127.0.0.1:4096 --directory /your/project"
+        }
+      </pre>
+      <p className="field-help">
+        Choose OpenCode coding runtime in Connections and start OpenCode in your
+        project first. Native tool activity and permission requests appear in
+        your Council discussion. Model credentials stay in OpenCode.
+      </p>
+      <h3>Open the full native coding interface</h3>
+      <pre>
+        {
+          "npm run cli -- code --url http://127.0.0.1:4096\n  --directory /your/project --session SESSION_ID"
+        }
+      </pre>
     </Modal>
   );
 }

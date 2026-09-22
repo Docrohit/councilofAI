@@ -41,7 +41,7 @@ Or build the included Dockerfile and use `compose.yaml` behind your existing HTT
 - SSE needs proxy buffering disabled and a sufficiently long read timeout. Example Nginx location directives: `proxy_buffering off; proxy_read_timeout 3600s;` plus normal Web proxy headers.
 - Current guardrails include scrypt password hashes, hashed session tokens, secure HttpOnly/SameSite cookies in hosted mode, same-origin request checks, account scoping, per-IP limits, one active run per account, global run capacity, bounded outputs, and encrypted provider keys.
 - Before broad public signup, add email verification/recovery, account deletion/retention controls, stronger shared abuse limits, monitoring, backups/restore drills, and an independent security review. Resource controls are not dollar-denominated billing caps. Users should also configure provider-side spending limits.
-- Current tools work only with virtual text files. Shell/browsing/code execution requires a separate per-user sandbox design; do not grant untrusted hosted agents access to the server host.
+- Model-only tools use virtual text files. Real coding is available through outbound OpenCode workers on user-controlled project machines; see [Coding](CODING.md). Do not run visitor workers on the application host. Hosted per-user sandbox provisioning is not implemented.
 
 Confirm the latest GitHub Actions deployment and public HTTPS health endpoint before considering a release live.
 

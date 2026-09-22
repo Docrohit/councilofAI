@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
+import { OpenCodeWorker } from "./opencode.ts";
 import { complete, streamJson } from "../server/providers.ts";
 import type {
   Provider,
@@ -18,6 +20,9 @@ const { values, positionals } = parseArgs({
     providers: { type: "string" },
     provider: { type: "string" },
     url: { type: "string" },
+    directory: { type: "string" },
+    session: { type: "string" },
+    "native-permissions": { type: "boolean" },
     concurrency: { type: "string" },
     agents: { type: "string" },
     "max-agents": { type: "string" },
@@ -146,6 +151,10 @@ async function watch(id: string) {
           print(
             `\n[Finding ${d.finding.key} · ${d.finding.state} · revision ${d.finding.revision}] ${d.finding.claim}\n`,
           );
+        if (event.type === "coding.activity")
+          print(
+            `\n[${d.kind}: ${d.title} · ${d.status || ""}]\n${d.detail}\n${["permission", "question"].includes(d.kind) ? "Respond in the Council web session.\n" : ""}`,
+          );
         if (event.type === "turn.error") print(`\nError: ${d.message}\n`);
         if (event.type === "run.final")
           print(`\n\nCOUNCIL CONCLUSION\n\n${d.text}\n`);
@@ -165,7 +174,7 @@ async function watch(id: string) {
     }
   }
 }
-async function worker() {
+async function worker(coding = false) {
   if (!values.provider || !values.url)
     throw new Error(
       "worker requires --provider ID --url http://127.0.0.1:11434",
@@ -176,6 +185,30 @@ async function worker() {
   );
   if (!provider)
     throw new Error("Create a bridge connection in the web app first.");
+  if (coding !== (provider.kind === "opencode"))
+    throw new Error(
+      "Use coding-worker for an OpenCode connection, worker for a model-only bridge.",
+    );
+  if (coding && !values.directory)
+    throw new Error(
+      "coding-worker requires --directory /absolute/project/path",
+    );
+  const runtime = coding
+    ? new OpenCodeWorker({
+        url: values.url,
+        directory: values.directory!,
+        stateFile: path.join(configDir, `opencode-${provider.id}.json`),
+        password: process.env.OPENCODE_SERVER_PASSWORD,
+        username: process.env.OPENCODE_SERVER_USERNAME,
+        nativePermissions: values["native-permissions"],
+      })
+    : undefined;
+  if (runtime) {
+    const health = await runtime.verify();
+    console.log(
+      `OpenCode ${health.version}: ${runtime.directory}. Real project tools are enabled. Project context and tool output flow through ${base}. Permissions: ${values["native-permissions"] ? "runtime policy" : "ask in Council"}.`,
+    );
+  }
   const endpoint = new URL(values.url);
   if (
     !["http:", "https:"].includes(endpoint.protocol) ||
@@ -212,6 +245,17 @@ async function worker() {
         callController.signal,
         AbortSignal.timeout(240_000),
       ]);
+      let acknowledged: string[] = [];
+      let controls = Promise.resolve();
+      const receive = (data: any) => {
+        controls = controls.then(async () => {
+          for (const reply of data.replies || []) {
+            await runtime?.reply(reply);
+            acknowledged.push(reply.id);
+          }
+        });
+        return controls;
+      };
       let pending: Chunk[] = [],
         lastFlush = Date.now();
       const flush = async (done = false) => {
@@ -219,7 +263,14 @@ async function worker() {
         const chunks = pending;
         pending = [];
         try {
-          await api(`/bridge/jobs/${job.id}`, "POST", { chunks, done });
+          const ack = acknowledged.splice(0);
+          await receive(
+            await api(`/bridge/jobs/${job.id}`, "POST", {
+              chunks,
+              done,
+              acknowledged: ack,
+            }),
+          );
         } catch (error) {
           callController.abort();
           throw error;
@@ -227,15 +278,17 @@ async function worker() {
         lastFlush = Date.now();
       };
       const heartbeat = setInterval(() => {
-        api(`/bridge/jobs/${job.id}`, "POST", {}).catch(() =>
-          callController.abort(),
-        );
+        api(`/bridge/jobs/${job.id}`, "POST", {
+          acknowledged: acknowledged.splice(0),
+        })
+          .then(receive)
+          .catch(() => callController.abort());
       }, 2000);
       try {
-        for await (const chunk of complete(localProvider, {
-          ...job.request,
-          signal,
-        })) {
+        const stream = runtime
+          ? runtime.complete(provider, { ...job.request, signal })
+          : complete(localProvider, { ...job.request, signal });
+        for await (const chunk of stream) {
           pending.push(chunk);
           if (pending.length >= 20 || Date.now() - lastFlush > 200)
             await flush();
@@ -260,7 +313,7 @@ async function main() {
   const command = positionals[0];
   if (!command || values.help) {
     console.log(
-      `Council CLI\n\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nCreate your account and model connections in the web app first.`,
+      `Council CLI\n\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  code --url URL --directory /project [--session SESSION_ID]\n                                    Open the full native OpenCode terminal UI\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nCreate your account and model connections in the web app first.`,
     );
     return;
   }
@@ -293,6 +346,35 @@ async function main() {
     });
     chmodSync(configFile, 0o600);
     console.log(`Signed in to ${base}. Token saved to ${configFile}`);
+    return;
+  }
+  if (command === "code") {
+    if (!values.url || !values.directory)
+      throw new Error("code requires --url and --directory");
+    const runtime = new OpenCodeWorker({
+      url: values.url,
+      directory: values.directory,
+      password: process.env.OPENCODE_SERVER_PASSWORD,
+      username: process.env.OPENCODE_SERVER_USERNAME,
+    });
+    await runtime.verify();
+    const args = [
+      "attach",
+      runtime.endpoint,
+      "--dir",
+      runtime.directory,
+      ...(values.session ? ["--session", values.session] : []),
+    ];
+    const child = spawn(process.env.COUNCIL_OPENCODE_BIN || "opencode", args, {
+      stdio: "inherit",
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => {
+        process.exitCode = code || 0;
+        resolve();
+      });
+    });
     return;
   }
   if (!token) throw new Error("Run login first, or set COUNCIL_TOKEN.");
@@ -351,8 +433,8 @@ async function main() {
     console.log("Stop requested.");
     return;
   }
-  if (command === "worker") {
-    await worker();
+  if (command === "worker" || command === "coding-worker") {
+    await worker(command === "coding-worker");
     return;
   }
   if (command === "logout") {

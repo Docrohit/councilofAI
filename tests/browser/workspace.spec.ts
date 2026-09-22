@@ -92,6 +92,9 @@ test("signup, responsive workspace, one model with five peers, resolved finding 
   await expect(page.locator(".final-answer")).toContainText(
     "scripted demonstration",
   );
+  await expect
+    .poll(() => page.locator(".transcript").evaluate((el) => el.scrollTop))
+    .toBe(0);
   await page.screenshot({
     path: info.outputPath("answer.png"),
     fullPage: true,

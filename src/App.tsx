@@ -1,3 +1,4 @@
+import { version as councilVersion } from "../package.json";
 import { ProjectWorkspace } from "./ProjectWorkspace";
 import { CommunicationPanel } from "./CommunicationPanel";
 import {
@@ -307,7 +308,7 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
       </div>
       <footer className="auth-footer">
         <span>Built for open collaboration.</span>
-        <span>Personal project · v0.1</span>
+        <span>Personal project · v{councilVersion}</span>
       </footer>
     </div>
   );
@@ -881,6 +882,14 @@ export default function App() {
         if (!["queued", "running"].includes(event.data.status)) {
           source.close();
           setStreamError(false);
+          // Reconcile persisted final state after completion or a reconnect.
+          api<{ run: Run; events: CouncilEvent[] }>(`/runs/${runId}`)
+            .then((data) => {
+              if (runRef.current !== runId) return;
+              setRun(data.run);
+              setEvents(data.events);
+            })
+            .catch(() => setStreamError(true));
         }
       }
       if (event.type === "run.final")
@@ -891,9 +900,13 @@ export default function App() {
     return () => source.close();
   }, [runId]);
   useEffect(() => {
-    if (follow.current)
+    if (follow.current && ["discussion", "engagement"].includes(tab))
       bottom.current?.scrollIntoView({ behavior: "instant", block: "end" });
   }, [events.length, tab]);
+  useEffect(() => {
+    follow.current = ["discussion", "engagement"].includes(tab);
+    if (!follow.current) list.current?.scrollTo({ top: 0 });
+  }, [tab, runId]);
   const view = useMemo(() => activity(events), [events]);
   const members = useMemo(() => {
     const result = new Map<string, Member>(
@@ -1333,12 +1346,12 @@ export default function App() {
                         <Layers size={30} />
                         <h3>
                           {active
-                            ? "Understanding comes before the answer."
+                            ? "No final answer yet."
                             : "No final answer was produced."}
                         </h3>
                         <p>
                           {active
-                            ? "Your team’s proposals, disagreements, and reviews are visible in Discussion."
+                            ? "The council is still working. This tab will show its final answer or qualified conclusion when the run ends. Follow current work in Discussion."
                             : "Review the session’s errors, adjust your connections, and try again."}
                         </p>
                       </div>
@@ -1620,7 +1633,7 @@ export default function App() {
             <div className="panel-bottom">
               <span className="status-dot" />{" "}
               {active ? "Live team activity" : "Ready to connect minds"}
-              <span>v0.1</span>
+              <span>v{councilVersion}</span>
             </div>
           </aside>
         </div>

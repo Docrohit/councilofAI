@@ -55,6 +55,7 @@ export interface Run {
   createdAt: string;
   final: string;
   demo: boolean;
+  verificationTools?: boolean;
   parentId?: string;
   resumeState?: SharedState;
   sharedState?: SharedState;

@@ -1,6 +1,6 @@
 {
   "name": "council-harness",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "A personal multi-model agent council with a web workspace and developer CLI",

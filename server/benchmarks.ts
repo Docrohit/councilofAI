@@ -250,6 +250,7 @@ export class Benchmarks {
             "\nGive your final answer on a line formatted exactly FINAL_ANSWER: value. Do not include units, commentary, punctuation, or Markdown on that line.";
           const run: Run = {
             id: randomUUID(),
+            verificationTools: false,
             title: `Benchmark ${task.id} · trial ${repeat}`,
             prompt,
             status: "queued",

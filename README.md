@@ -201,3 +201,23 @@ these workspaces expire after 30 minutes idle, two hours total, or a broker
 restart. They have no network, a 64 MB project, 256 MB memory, and 30-second
 commands. For dependency installation, larger projects and full native coding
 tools, use standalone Council in your local or server project directory. Details: [Coding](docs/CODING.md).
+
+### Verification and action errors
+
+Normal sessions include a bounded `factor_integer` tool for positive integers up
+to 10^12. It computes prime factors, divisor count and a reconstructed product
+using exact integer arithmetic, then publishes the observed result to the board.
+It requires no shell or coding project. This is a specific arithmetic check, not
+a general guarantee of mathematical correctness. Benchmark sessions disable it
+to preserve the existing comparison with an unaided single-model baseline.
+
+Malformed action JSON is rejected with a field/format error sent back to the
+agent for correction. Rejected actions are not described as successfully
+published. Completion requires a work key and result; only the claim needs a
+description. Repeated discussion without recorded evidence triggers a request
+for a concrete check or blocker. Models may still make errors or fail to converge.
+
+The Answer tab contains the final answer or a qualified conclusion after the
+run ends. While running, it explains that no final answer is ready. Existing
+historical answers are not rewritten by an upgrade; start a fresh session when
+retesting corrected behavior.

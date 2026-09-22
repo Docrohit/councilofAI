@@ -792,3 +792,132 @@ test("sandbox API derives ownership from authentication and blocks manual writes
     await new Promise<void>((r) => broker.close(() => r()));
   }
 });
+
+test("rejected actions feed back to the agent, recover and publish exact math evidence without a sandbox", async () => {
+  let repaired = false;
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      user = body.messages[1].content;
+    const board = JSON.parse(
+      user
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    const inbox = JSON.parse(user.split("YOUR INBOX:\n")[1].split("\n\n")[0]);
+    const owner = board.peers.find((p: any) => p.id === "peer-1");
+    const isOwner = body.messages[0].content.includes("NAME: Atlas");
+    let output = "";
+    if (board.candidate)
+      output = JSON.stringify({
+        review: {
+          candidateId: board.candidate.id,
+          agree: true,
+          reason: "Exact tool output has 32 divisors.",
+        },
+      });
+    else if (!isOwner)
+      output = JSON.stringify({
+        messages: [
+          { to: "peer-1", content: "Please obtain the exact tool result." },
+        ],
+      });
+    else if (inbox.some((m: any) => m.kind === "protocol_error")) {
+      repaired = true;
+      output = JSON.stringify({
+        work: [
+          {
+            key: "factor",
+            status: "claim",
+            description: "Check exact factors",
+          },
+        ],
+        tools: [{ name: "factor_integer", integer: "2045901" }],
+      });
+    } else if (
+      board.communication.board.some((p: any) =>
+        p.content.includes('"divisorCount":32'),
+      )
+    ) {
+      output = JSON.stringify({
+        work: [
+          {
+            key: "factor",
+            status: "complete",
+            result: "Actual factor_integer result: 32 divisors.",
+          },
+        ],
+        proposal: {
+          answer: "2045901 = 3 × 11 × 13 × 19 × 251; 32 positive factors.",
+          rationale: "Exact integer verification, not repeated claims.",
+        },
+      });
+    } else
+      output = String.raw`{"proposal":{"answer":"\(2045901\)","rationale":"bad JSON escape fixture"}}`;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [{ delta: { content: "```council\n" + output + "\n```" } }],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Math fixture",
+        email: "math@example.test",
+        password: "long-password-123",
+      });
+      const provider = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const started = await api(
+        "/runs",
+        {
+          prompt: "Find the factors of 2045901",
+          config: cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 12 }),
+        },
+        auth.cookie,
+      );
+      const result = await done(api, auth.cookie, started.data.id);
+      assert.equal(repaired, true);
+      assert.equal(result.run.status, "completed");
+      assert.match(result.run.final, /32 positive factors/);
+      const first = result.events.find((e: any) => e.type === "turn.done");
+      assert.match(first.data.text, /No valid team actions/);
+      assert.doesNotMatch(first.data.text, /Published team actions/);
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "tool.result" && e.data.tool === "factor_integer",
+        ),
+      );
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "board.post" &&
+            e.data.post.content.includes('"divisorCount":32'),
+        ),
+      );
+      assert.equal(result.run.sharedState.work[0].state, "complete");
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});

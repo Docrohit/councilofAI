@@ -53,6 +53,65 @@ export interface CompletionRequest {
   maxTokens: number;
   signal: AbortSignal;
 }
+
+// Provider errors are returned only to the owning account. Keep useful diagnostics,
+// but never echo a key even when a provider includes one in its error message.
+function providerError(provider: Provider, payload: any, status?: number) {
+  const detail = payload?.error || payload?.response?.error || payload;
+  const redact = (value: unknown) => {
+    let text = typeof value === "string" ? value : "";
+    if (provider.apiKey) text = text.replaceAll(provider.apiKey, "[redacted]");
+    return text
+      .replace(/\b(?:sk-|gh[pousr]_)[A-Za-z0-9_-]+/g, "[redacted]")
+      .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .slice(0, 600);
+  };
+  const code = redact(detail?.code || detail?.type);
+  const guidance: Record<string, string> = {
+    credit_balance_exhausted:
+      "No API credits remain on this connection's provider account. Add API credits or use a funded API key, then test again.",
+    insufficient_quota:
+      "The API account's quota or spending limit is exhausted. Check the provider's API billing and limits, then test again.",
+    rate_limit_exceeded:
+      "The provider's rate limit was reached. Wait and retry, or reduce concurrent model calls.",
+    invalid_api_key:
+      "The provider rejected this API key. Edit the connection and save a valid key.",
+    authentication_error:
+      "The provider could not authenticate this connection. Check its API key.",
+    model_not_found:
+      "This model is unavailable to the saved API key. Check the model ID and the key's model access.",
+  };
+  const message =
+    guidance[code] ||
+    redact(typeof detail === "string" ? detail : detail?.message);
+  return new Error(
+    `${provider.name}: ${message || "The provider rejected the request. Check the endpoint, API key, model, and supported settings."}${code ? ` [${code}]` : ""}${status ? ` (HTTP ${status})` : ""}`,
+  );
+}
+
+async function errorPayload(response: Response) {
+  if (!response.body) return undefined;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "",
+    bytes = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.length;
+      if (bytes > 16_384) return undefined;
+      text += decoder.decode(value, { stream: true });
+    }
+    return JSON.parse(text + decoder.decode());
+  } catch {
+    return undefined;
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
 export async function* complete(
   provider: Provider,
   request: CompletionRequest,
@@ -124,9 +183,10 @@ export async function* complete(
     redirect: "error",
   });
   if (!response.ok || !response.body) {
-    await response.body?.cancel();
-    throw new Error(
-      `${provider.name}: provider returned HTTP ${response.status}. Check endpoint, key, model, and reasoning support.`,
+    throw providerError(
+      provider,
+      await errorPayload(response),
+      response.status,
     );
   }
   let finished = false,
@@ -136,7 +196,7 @@ export async function* complete(
     provider.kind === "ollama",
   )) {
     if (part.error || part.type === "error" || part.type === "response.failed")
-      throw new Error(`${provider.name}: provider reported a streaming error.`);
+      throw providerError(provider, part);
     if (part.type === "response.incomplete")
       throw new Error(
         `${provider.name}: output was incomplete; raise the per-call output limit.`,

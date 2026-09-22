@@ -210,3 +210,124 @@ test("hosted connections use exact allowlisted origins and local URLs cannot emb
     /credentials/,
   );
 });
+
+test("OpenAI quota errors remain actionable for both streamed error shapes", async () => {
+  for (const frame of [
+    { type: "error", code: "credit_balance_exhausted", message: "No credits" },
+    {
+      type: "response.failed",
+      response: {
+        error: { code: "credit_balance_exhausted", message: "No credits" },
+      },
+    },
+  ]) {
+    await fixture(
+      () => ({ frames: [frame] }),
+      async (base) => {
+        await assert.rejects(
+          async () => {
+            for await (const _ of complete(
+              {
+                id: "p",
+                name: "Codex",
+                kind: "openai",
+                baseUrl: base,
+                model: "gpt-5.3-codex",
+                transport: "direct",
+                reasoning: false,
+              },
+              request,
+            )) {
+            }
+          },
+          (error) => {
+            assert.match((error as Error).message, /No API credits remain/);
+            assert.match((error as Error).message, /credit_balance_exhausted/);
+            return true;
+          },
+        );
+      },
+    );
+  }
+});
+
+test("unknown provider errors preserve details without exposing credentials", async () => {
+  const key = "private-provider-key-value";
+  await fixture(
+    () => ({
+      frames: [
+        {
+          type: "error",
+          code: "unsupported_parameter",
+          message: `Parameter reasoning is unsupported. ${key} sk-sensitive-token Bearer another-secret`,
+        },
+      ],
+    }),
+    async (base) => {
+      await assert.rejects(
+        async () => {
+          for await (const _ of complete(
+            {
+              id: "p",
+              name: "Model",
+              kind: "openai",
+              baseUrl: base,
+              model: "gpt-4o",
+              transport: "direct",
+              reasoning: true,
+              apiKey: key,
+            },
+            request,
+          )) {
+          }
+        },
+        (error) => {
+          const message = (error as Error).message;
+          assert.match(message, /Parameter reasoning is unsupported/);
+          for (const secret of [key, "sk-sensitive-token", "another-secret"])
+            assert(!message.includes(secret));
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("HTTP JSON errors show authentication guidance and ignore non-JSON bodies", async () => {
+  for (const [status, body, expected] of [
+    [
+      401,
+      JSON.stringify({
+        error: { code: "invalid_api_key", message: "Bad key" },
+      }),
+      /provider rejected this API key/,
+    ],
+    [502, "<html>upstream failure</html>", /HTTP 502/],
+  ] as const) {
+    const server = createServer((_req, res) => {
+      res.writeHead(status);
+      res.end(body);
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    try {
+      await assert.rejects(async () => {
+        for await (const _ of complete(
+          {
+            id: "p",
+            name: "Model",
+            kind: "openai",
+            baseUrl: `http://127.0.0.1:${(server.address() as any).port}`,
+            model: "gpt-4o",
+            transport: "direct",
+            reasoning: false,
+          },
+          request,
+        )) {
+        }
+      }, expected);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  }
+});

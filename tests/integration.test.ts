@@ -811,10 +811,10 @@ test("rejected actions feed back to the agent, recover and publish exact math ev
     let output = "";
     if (board.candidate)
       output = JSON.stringify({
-        review: {
-          candidateId: board.candidate.id,
-          agree: true,
-          reason: "Exact tool output has 32 divisors.",
+        proposal: {
+          answer: board.candidate.answer,
+          rationale:
+            "Repeated identical answer must retain prior reviews; exact tool output has 32 divisors.",
         },
       });
     else if (!isOwner)
@@ -909,6 +909,11 @@ test("rejected actions feed back to the agent, recover and publish exact math ev
       assert.equal(repaired, true);
       assert.equal(result.run.status, "completed");
       assert.match(result.run.final, /32 positive factors/);
+      assert.equal(
+        result.events.filter((e: any) => e.type === "candidate.proposed")
+          .length,
+        1,
+      );
       const first = result.events.find((e: any) => e.type === "turn.done");
       assert.match(first.data.text, /No valid team actions/);
       assert.doesNotMatch(first.data.text, /Published team actions/);

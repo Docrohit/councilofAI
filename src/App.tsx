@@ -1473,7 +1473,6 @@ export default function App() {
           providers={providers}
           refresh={() => loadProviders()}
           onTeam={() => {
-            setConfig(defaults(providers));
             setModal("team");
           }}
         />

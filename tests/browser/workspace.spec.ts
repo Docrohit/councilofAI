@@ -39,6 +39,21 @@ test("signup, responsive workspace, one model with five peers, resolved finding 
   });
   await dialog.getByRole("button", { name: "Save team" }).click();
   await expect(dialog).not.toBeVisible();
+  // Navigating through Connections must preserve the saved roster and budgets.
+  await page
+    .getByRole("button", { name: "Configure team", exact: true })
+    .first()
+    .click();
+  await dialog
+    .getByRole("button", { name: "Manage connections", exact: true })
+    .click();
+  await dialog
+    .getByRole("button", { name: "Configure team", exact: true })
+    .click();
+  await expect(dialog.getByLabel("Starting agent count")).toHaveValue("5");
+  await expect(dialog.getByLabel(/Free delegation/)).toBeChecked();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
   await page
     .getByRole("textbox", { name: "Your goal" })
     .fill("Establish shared evidence and resolve a disagreement as a team.");

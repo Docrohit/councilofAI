@@ -119,7 +119,11 @@ persist; terminal team settings should be supplied again on a fresh launch.
 
 Start `council --agents 5` from the project you want to work on. Use `/connections`
 → **Add connection**, choose a provider, then fill the form. Tab moves between
-fields; Ctrl+U clears a field; Enter saves; Escape cancels. API-key text is masked.
+fields; Ctrl+U clears a field; Enter saves; Escape cancels. Paste your actual key
+into **API key (paste here; masked)**. The advanced **Environment variable NAME**
+field is an alternative: enter a name such as `OPENAI_API_KEY`, never its value.
+Leave it blank when pasting a key. Invalid variable-name input is rejected before
+it can be displayed. Validation errors stay on one line inside the terminal.
 
 | Connection ID | Provider | Model ID                                        | Base URL                                   |
 | ------------- | -------- | ----------------------------------------------- | ------------------------------------------ |

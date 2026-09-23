@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Dialog } from "../cli/tui-dialog.ts";
 import { sessionView, cells, fit, livePeers } from "../cli/tui-workspace.ts";
-import { cleanTerminal, wrapTerminal } from "../cli/tui.ts";
+import { cleanTerminal, wrapTerminal, terminalRow } from "../cli/tui.ts";
 import {
   saveNativeKey,
   readNativeKey,
@@ -273,4 +273,16 @@ test("aborting a provider stream resumes a pending read and stops buffered yield
     assert.equal(cancelled, true);
     assert.equal(stream.locked, false);
   }
+});
+
+test("status rows cannot insert extra terminal lines and dialog errors are readable", async () => {
+  const row = terminalRow("Failure:\nline two\r\nline three\tmore", 32);
+  assert.doesNotMatch(row, /[\r\n\t]/);
+  assert.equal(cells(row), 32);
+  const d = new Dialog("Connection", [], () => {
+    throw { issues: [{ path: ["keyEnv"] }], message: "raw\nJSON" };
+  });
+  await d.key("", { name: "return" });
+  assert.match(d.error, /Check the connection fields/);
+  assert.doesNotMatch(d.error, /\n|JSON/);
 });

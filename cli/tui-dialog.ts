@@ -8,6 +8,7 @@ export interface Field {
   value: string;
   secret?: boolean;
   hint?: string;
+  validate?: (value: string) => string | undefined;
 }
 export class Dialog {
   query = "";
@@ -88,7 +89,10 @@ export class Dialog {
             : [this.filtered[this.index]?.id].filter(Boolean),
         );
       } catch (e) {
-        this.error = (e as Error).message;
+        const issues = (e as { issues?: unknown }).issues;
+        this.error = Array.isArray(issues)
+          ? "Check the connection fields. Use a variable NAME for environment-based keys."
+          : (e as Error).message.replace(/[\r\n\t]+/g, " ").slice(0, 240);
       }
     } else if (!pasted && this.multiple && str === " ") {
       const id = this.filtered[this.index]?.id;
@@ -105,8 +109,15 @@ export class Dialog {
       else if ((pasted || (!k.ctrl && !k.meta)) && str)
         value += str.replace(/[\r\n\t]/g, "");
       else return;
-      if (f) f.value = value.slice(0, f.secret ? 16000 : 500);
-      else {
+      if (f) {
+        const error = f.validate?.(value);
+        if (error) {
+          this.error = error;
+          return;
+        }
+        f.value = value.slice(0, f.secret ? 16000 : 500);
+        this.error = "";
+      } else {
         this.query = value.slice(0, 200);
         this.index = 0;
       }

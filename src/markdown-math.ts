@@ -50,6 +50,33 @@ function normalizeProse(text: string): string {
       }
     }
     if (text[i] === "\\") {
+      // Some model answers carry JSON-escaped delimiters into prose. Only
+      // repair matched doubled delimiters whose body has mathematical syntax;
+      // ordinary escaped text and all protected code spans remain literal.
+      const doubled = text[i + 1] === "\\" && ["(", "["].includes(text[i + 2]);
+      if (doubled) {
+        const display = text[i + 2] === "[";
+        const closing = display ? "\\\\]" : "\\\\)";
+        const end = text.indexOf(closing, i + 3);
+        const body = end < 0 ? "" : text.slice(i + 3, end);
+        if (end >= 0 && /\\[A-Za-z]+|[\d_^=+*/<>]/.test(body)) {
+          // Decode a whole escaping layer only when every slash run is even
+          // and a recognized escaped command signals mathematical intent.
+          // Never collapse a suffix of a row break (four slashes become two).
+          const escapedCommand =
+            /(?<!\\)\\\\(?:(?:begin|frac|dfrac|tfrac|sqrt)\s*\{|(?:zeta|alpha|beta|gamma|delta|theta|lambda|pi|sigma|phi|omega)\b)/.test(
+              body,
+            );
+          const allEscaped = [...body.matchAll(/\\+/g)].every(
+            (m) => m[0].length % 2 === 0,
+          );
+          const math =
+            escapedCommand && allEscaped ? body.replace(/\\\\/g, "\\") : body;
+          result += display ? `\n\n$$\n${math.trim()}\n$$\n\n` : `$${math}$`;
+          i = end + 3;
+          continue;
+        }
+      }
       const next = text[i + 1];
       if (next === "(" || next === "[") {
         const end = text.indexOf(next === "(" ? "\\)" : "\\]", i + 2);

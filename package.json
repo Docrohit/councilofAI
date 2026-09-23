@@ -1,6 +1,6 @@
 {
   "name": "council-harness",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "description": "A personal multi-model agent council with a web workspace and developer CLI",
@@ -25,11 +25,15 @@
     "helmet": "^8.1.0",
     "html-to-text": "^10.0.1",
     "ipaddr.js": "^2.5.0",
+    "katex": "^0.16.47",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "tsx": "^4.21.0",
     "zod": "^4.3.6"
   },

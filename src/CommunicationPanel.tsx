@@ -1,7 +1,6 @@
 import type { CouncilEvent, Member } from "../shared/types";
 import type { BoardPost, Conversation } from "../server/communication";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "./Markdown";
 
 export function CommunicationPanel({
   events,
@@ -21,9 +20,6 @@ export function CommunicationPanel({
       threads.set(event.data.conversation.id, event.data.conversation);
   }
   const name = (id: string) => members.find((m) => m.id === id)?.name || id;
-  const markdown = (text: string) => (
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-  );
   return (
     <section className="communication-panel">
       <h2>
@@ -54,7 +50,7 @@ export function CommunicationPanel({
               {post.replyTo && (
                 <a href={`#post-${post.replyTo}`}>Reply to earlier post</a>
               )}
-              <div className="markdown">{markdown(post.content)}</div>
+              <Markdown>{post.content}</Markdown>
             </article>
           ))
         : [...threads.values()].map((thread) => (
@@ -73,7 +69,7 @@ export function CommunicationPanel({
               {thread.messages.map((message, index) => (
                 <div className="conversation-message" key={index}>
                   <strong>{name(message.author)}</strong>
-                  <div className="markdown">{markdown(message.content)}</div>
+                  <Markdown>{message.content}</Markdown>
                 </div>
               ))}
               {thread.proposal && (
@@ -81,9 +77,7 @@ export function CommunicationPanel({
                   <h4>
                     Proposed conclusion · revision {thread.proposal.revision}
                   </h4>
-                  <div className="markdown">
-                    {markdown(thread.proposal.summary)}
-                  </div>
+                  <Markdown>{thread.proposal.summary}</Markdown>
                   <ul>
                     {thread.proposal.evidence.map((e, i) => (
                       <li key={i}>{e}</li>

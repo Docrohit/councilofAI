@@ -42,8 +42,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "./Markdown";
 import type {
   CouncilEvent,
   Member,
@@ -87,25 +86,6 @@ function Mark({ small = false }: { small?: boolean }) {
       <i />
       <i />
     </span>
-  );
-}
-function Markdown({ children }: { children: string }) {
-  return (
-    <div className="markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer">
-              {children}
-            </a>
-          ),
-          img: ({ alt }) => <span>[Image: {alt}]</span>,
-        }}
-      >
-        {children}
-      </ReactMarkdown>
-    </div>
   );
 }
 function Modal({

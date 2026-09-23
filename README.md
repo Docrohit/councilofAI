@@ -6,7 +6,12 @@
 
 Council is a personal, self-hostable multi-LLM orchestration project with a mobile-friendly web workspace and developer CLI. Agents are peers: they choose roles, talk directly, ask one another to investigate, invite specialists, establish shared evidence, and challenge proposed answers. There is no permanent coordinator.
 
-> Working alpha. Includes a clearly labelled scripted demo. Real model adapters are implemented and tested against protocol fixtures; this checkout has not yet been validated with live paid API models or a downloaded local model. Council is an independent project, not affiliated with OpenCode.
+> Working alpha. Includes a clearly labelled scripted demo. Automated protocol, browser, terminal and container checks validate system behavior; they do not establish real-model quality or superiority over a single model. Council is an independent project, not affiliated with OpenCode.
+
+Read the [full architecture](docs/ARCHITECTURE.md) for execution modes, peer
+collaboration, tools, storage, security, deployment and the planned LSP/MCP/skills
+integrations. [Web research](docs/RESEARCH.md) is available as an opt-in feature;
+LSP, MCP and Agent Skills loading remain unimplemented.
 
 ## Standalone coding CLI / TUI
 

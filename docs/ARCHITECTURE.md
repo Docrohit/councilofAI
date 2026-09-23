@@ -6,6 +6,11 @@ This document describes that implementation, followed by a
 separate extension plan. It does not claim that every installation is running
 that revision or that Council has reached full OpenCode parity.
 
+The [documentation index](README.md) links the owner-confirmed development and
+business plans. Staging, daily allowances, paid credits, BYOK activation,
+native desktop apps and PostgreSQL remain future work. See
+[known issues](KNOWN_ISSUES.md) for candidate-review recovery defects.
+
 Council is an independent multi-model work harness. It combines a peer
 collaboration engine, model connections, tools, durable sessions, a responsive
 web workspace, and a standalone CLI/TUI. OpenCode is an optional adapter, not a
@@ -333,7 +338,9 @@ status/absence messaging while pending; Discussion is the live work view.
 Provider failure first attempts another selected provider while retaining the
 agent's identity, task, partial public output and inbox. If unavailable, that peer
 is marked unavailable and unfinished work is offered to another available peer.
-Claims and objections remain. There is no predictive cost-aware routing,
+Finding and conversation state remain, but an unavailable peer's negative
+final-candidate review can cease blocking completion in the current code; see
+[known issues](KNOWN_ISSUES.md). There is no predictive cost-aware routing,
 persistent circuit breaker or guarantee of equivalent replacement-model ability.
 
 **Continue** creates a child run with fresh budgets and saved peers, tasks,
@@ -713,6 +720,23 @@ disabled skills and denied execution. `AGENTS.md` remains a separate project
 instruction mechanism.
 
 ### Subsequent milestones
+
+**Deferred by user on 2026-09-23: evidence labels on the shared board.**
+Keep the current board behavior until this is explicitly resumed. Proposed scope:
+
+- Label updates, findings, deductions, observed evidence and reviewed conclusions.
+- Show the posting agent and any coauthors/reviewers to users and other agents.
+- Attach inspectable supporting evidence; distinguish agent claims and peer
+  agreement from deterministic verification. A model cannot certify its own
+  statement as proven merely by selecting a label.
+- Surface substantive findings and reviewed conclusions on the shared board,
+  keeping them discoverable beyond the latest twenty posts.
+- Design how every peer receives important evidence and corrections, including
+  late-joining agents, without implying that delivery guarantees comprehension.
+- Mark disputed or superseded evidence so old conclusions are not silently reused.
+
+No implementation from the deferred attempt is retained. Labels, proof handling
+and delivery details remain proposals requiring design and tests when resumed.
 
 Separately plan skills/MCP, slash picker, persistent hosted projects, native
 project access from web, richer editor/PTY, context management, branching/rollback

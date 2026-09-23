@@ -13,6 +13,11 @@ collaboration, tools, storage, security, deployment and the planned LSP/MCP/skil
 integrations. [Web research](docs/RESEARCH.md) is available as an opt-in feature;
 LSP, MCP and Agent Skills loading remain unimplemented.
 
+For development and planning, start with the [documentation index](docs/README.md)
+and [Council task prompts](PROMPTS/README.md). The business and release plans
+describe future daily free tasks, BTC/Lightning credits, BYOK activation and
+staging; they do not change today's runtime or account requirements.
+
 ## Standalone coding CLI / TUI
 
 Council includes its **own terminal UI, editor and local project runtime**. No
@@ -97,7 +102,7 @@ Evidence in the ledger is an **agent claim**, not automatically proven truth. De
 
 Peers can assess one another in specific domains using established shared findings as evidence. Self-ratings do not affect the summaries, and assessments stop contributing when their evidence is disputed or revised. These are task-specific peer assessments, not independent proof of expertise. Agents can use them to change assignments and reporting relationships as work progresses.
 
-If a provider fails, Council can move the same agent identity to another selected model while retaining its task, partial public contribution, inbox, and shared findings. State is checkpointed for continuation after interruption. Recovery requires another available model or a later restart; an unresolved objection is preserved.
+If a provider fails, Council can move the same agent identity to another selected model while retaining its task, partial public contribution, inbox, and shared findings. State is checkpointed for continuation after interruption. Recovery requires another available model or a later restart. Known gaps remain: an unavailable peer's negative final-candidate review can cease blocking completion, and continuation does not restore the active candidate/reviews. See [known issues](docs/KNOWN_ISSUES.md).
 
 ## Benchmarks
 

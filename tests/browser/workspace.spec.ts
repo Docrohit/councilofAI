@@ -28,6 +28,8 @@ test("signup, responsive workspace, one model with five peers, resolved finding 
     .first()
     .click();
   const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel(/Web research/)).not.toBeChecked();
+  await dialog.getByLabel(/Web research/).check();
   await dialog.getByLabel("Starting agent count").fill("5");
   await dialog.getByLabel(/Free delegation/).check();
   await expect(
@@ -52,6 +54,7 @@ test("signup, responsive workspace, one model with five peers, resolved finding 
     .click();
   await expect(dialog.getByLabel("Starting agent count")).toHaveValue("5");
   await expect(dialog.getByLabel(/Free delegation/)).toBeChecked();
+  await expect(dialog.getByLabel(/Web research/)).toBeChecked();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await page

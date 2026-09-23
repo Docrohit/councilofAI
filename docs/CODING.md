@@ -23,7 +23,7 @@ files, nested folders and project instructions, rather than a single upload.
 | Real multi-file web coding                                      | Temporary isolated Node workspace                               | Persistent Git repositories and native local-project web bridge         |
 | LSP, MCP, plugins, skills, formatters                           | Can invoke installed tools through approved commands            | First-class native integrations                                         |
 | Git projects                                                    | Open existing directories; inspect diffs; approved Git commands | Managed worktrees, conflict UI and review/revert workflow               |
-| General work                                                    | Text files plus approved installed command-line tools           | Built-in browser/research and document extraction                       |
+| General work                                                    | Text files, approved commands and opt-in web search/page reading | Interactive browser automation and document extraction                 |
 | OpenCode compatibility                                          | Optional adapter documented below                               | Never required by native Council                                        |
 
 **Full OpenCode parity is unfinished.** This table tracks actual native features;

@@ -41,6 +41,7 @@ Enter a goal to let your agents work in this directory.
 /use ID1,ID2                            Select the team's models
 /agents 5                               Five agents, independent of model count
 /budget 40                              Maximum Council model calls
+/web on | off                           Enable/disable public web research
 /concurrency 1                          Concurrent agents (start with one for coding)
 /limits 12 3                            Total agents and spawn depth; unlimited allowed
 /files                                  Browse the project file list
@@ -72,9 +73,11 @@ Esc stops active work. Ctrl+C stops a run, or exits when idle.
 Writes and commands ask permission. Local shell commands have your OS access;
 the project path is not a sandbox. Public output and files read by agents go to
 the selected model providers. Session history stays in your local Council data folder.
-PDF/Word parsing, web browsing, LSP and MCP are not built-in tools yet.
+Web research is opt-in: /web on. Search uses a selected OpenAI API connection.
+PDF/Word parsing, interactive browsing, LSP and MCP integrations remain pending.
 `;
 export interface TuiOptions {
+  webResearch?: boolean;
   directory: string;
   agents?: number;
   ids?: string[];
@@ -178,6 +181,7 @@ export async function startTui(options: TuiOptions) {
         config.maxAgents = Math.max(config.maxAgents, count);
     } else {
       config = next;
+      config.webResearch = !!options.webResearch;
       if (options.maxCalls !== undefined) config.maxCalls = options.maxCalls;
       if (options.concurrency !== undefined)
         config.concurrency = options.concurrency;
@@ -251,6 +255,14 @@ export async function startTui(options: TuiOptions) {
       return (
         additionalTools +
         "\n" +
+        events
+          .filter((e) => e.type === "tool.result" || e.type === "tool.error")
+          .map(
+            (e) =>
+              `${name(e.data.agentId)} · ${e.data.tool || "Tool error"}\n${e.data.message || e.data.result}`,
+          )
+          .join("\n\n") +
+        "\n" +
         [...tools.values()]
           .map(
             (t) => `${name(t.agentId)} · ${t.title} · ${t.status}\n${t.detail}`,
@@ -296,7 +308,7 @@ export async function startTui(options: TuiOptions) {
     const frame = [
       row(` Council  |  ${council.directory}`),
       row(
-        ` ${status} · ${config?.members.length || 0} agents · ${config?.providerIds.join(", ") || "no models"} · ${events.filter((e) => e.type === "turn.start").length}/${config?.maxCalls || 24} calls · ${events.filter((e) => e.type === "turn.done").reduce((sum, e) => sum + (e.data.inputTokens || 0) + (e.data.outputTokens || 0), 0)} tokens`,
+        ` ${status} · ${config?.members.length || 0} agents · ${config?.providerIds.join(", ") || "no models"} · ${events.filter((e) => e.type === "turn.start" || e.type === "research.start").length}/${config?.maxCalls || 24} calls · ${events.filter((e) => e.type === "turn.done" || e.type === "research.done").reduce((sum, e) => sum + (e.data.inputTokens || 0) + (e.data.outputTokens || 0), 0)} tokens`,
       ),
       row(tabs.map((t, i) => (i === tab ? `[${t}]` : t)).join("  ")),
       row("─".repeat(width)),
@@ -423,6 +435,14 @@ export async function startTui(options: TuiOptions) {
     if (cmd === "agents") {
       configure(config?.providerIds, Number(arg));
       notice = "Agent count updated.";
+      return;
+    }
+    if (cmd === "web") {
+      if (!config) throw new Error("Configure a model first.");
+      if (!["on", "off"].includes(arg))
+        throw new Error("Use /web on or /web off.");
+      config.webResearch = arg === "on";
+      notice = `Web research ${config.webResearch ? "enabled; search may incur OpenAI search fees" : "disabled"}. Applies to subsequent goals.`;
       return;
     }
     if (cmd === "budget" || cmd === "concurrency") {

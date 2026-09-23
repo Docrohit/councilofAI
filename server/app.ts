@@ -62,6 +62,7 @@ const member = z.object({
 });
 const configSchema = z.object({
   sandbox: z.boolean().default(false),
+  webResearch: z.boolean().default(false),
   members: z.array(member).min(1).max(32),
   providerIds: z.array(z.string().min(1).max(80)).min(1).max(20),
   maxAgents: z.number().int().min(1).max(128).nullable().default(12),
@@ -320,12 +321,9 @@ export function createApp(directory: string, production = false) {
       ["write", "exec", "destroy"].includes(action.action) &&
       [...engine.active.values()].some((r) => r.userId === userOf(res).id)
     ) {
-      res
-        .status(409)
-        .json({
-          error:
-            "Stop the active council before manually changing its project.",
-        });
+      res.status(409).json({
+        error: "Stop the active council before manually changing its project.",
+      });
       return;
     }
     res.json(await sandboxRequest(userOf(res).id, action));
@@ -562,11 +560,9 @@ export function createApp(directory: string, production = false) {
     if (config.sandbox) {
       const sandbox = await sandboxRequest(userId, { action: "status" });
       if (!sandbox.active) {
-        res
-          .status(400)
-          .json({
-            error: "Create a hosted project before enabling coding tools.",
-          });
+        res.status(400).json({
+          error: "Create a hosted project before enabling coding tools.",
+        });
         return;
       }
     }

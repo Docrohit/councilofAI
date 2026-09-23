@@ -695,6 +695,19 @@ function EventCard({
             ? d.result
             : JSON.stringify(d.result, null, 2)}
         </pre>
+        {Array.isArray(d.sources) && (
+          <ul>
+            {d.sources
+              .filter((s: any) => /^https:\/\//.test(s.url))
+              .map((s: any) => (
+                <li key={s.url}>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer">
+                    {s.title || s.url}
+                  </a>
+                </li>
+              ))}
+          </ul>
+        )}
       </details>
     );
   if (event.type === "file.proposal")
@@ -1606,7 +1619,10 @@ export default function App() {
                 <div>
                   <dt>Model calls</dt>
                   <dd>
-                    {view.turns.size} / {config.maxCalls}
+                    {view.turns.size +
+                      events.filter((e) => e.type === "research.start")
+                        .length}{" "}
+                    / {config.maxCalls}
                   </dd>
                 </div>
                 <div>
@@ -2216,6 +2232,22 @@ function TeamSettings({
           <h3>Resource limits</h3>
           <span>Bound the run, not the team’s organization.</span>
         </div>
+        <label className="checkbox-label free-delegation">
+          <input
+            type="checkbox"
+            checked={!!value.webResearch}
+            onChange={(e) =>
+              setValue({ ...value, webResearch: e.target.checked })
+            }
+          />{" "}
+          Web research — search and read public sources
+        </label>
+        <p className="field-help">
+          Any model can read public HTTPS pages. Search uses a selected direct
+          OpenAI API connection and may incur search fees; each search request
+          counts toward the model-call budget. Retrieved evidence is shared with
+          your team. Maximum 4 searches and 12 page reads per run.
+        </p>
         <label className="checkbox-label free-delegation">
           <input
             type="checkbox"

@@ -34,6 +34,7 @@ const { values, positionals } = parseArgs({
     model: { type: "string" },
     "key-env": { type: "string" },
     "allow-write": { type: "boolean" },
+    web: { type: "boolean" },
     "allow-exec": { type: "boolean" },
     help: { type: "boolean", short: "h" },
   },
@@ -145,6 +146,10 @@ async function watch(id: string) {
           print(`\n↳ ${d.name} → ${d.to}: ${d.content}\n`);
         if (event.type === "agent.spawn")
           print(`\n+ Specialist ${d.name}: ${d.task}\n`);
+        if (event.type === "research.start")
+          print(`\n[Web search · ${d.provider} · ${d.model}] ${d.query}\n`);
+        if (event.type === "tool.result") print(`\n[${d.tool}] ${d.result}\n`);
+        if (event.type === "tool.error") print(`\nTool error: ${d.message}\n`);
         if (event.type === "finding.updated")
           print(
             `\n[Finding ${d.finding.key} · ${d.finding.state} · revision ${d.finding.revision}] ${d.finding.claim}\n`,
@@ -319,7 +324,7 @@ async function main() {
   }
   if (values.help) {
     console.log(
-      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
+      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--web]                      Enable public web research (search fees may apply)\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
     );
     return;
   }
@@ -331,6 +336,7 @@ async function main() {
     process.env.DEPLOYMENT_MODE = "local";
     const { startTui } = await import("./tui.ts");
     await startTui({
+      webResearch: !!values.web,
       directory: values.directory || process.cwd(),
       agents: values.agents ? Number(values.agents) : undefined,
       ids: values.providers?.split(","),
@@ -402,6 +408,7 @@ async function main() {
         Number(values.agents || 3),
       );
       if (values["max-calls"]) config.maxCalls = Number(values["max-calls"]);
+      config.webResearch = !!values.web;
       if (values.concurrency) config.concurrency = Number(values.concurrency);
       if (values["max-agents"])
         config.maxAgents =
@@ -527,6 +534,7 @@ async function main() {
     if (!Number.isInteger(count) || count < 1 || count > 32)
       throw new Error("Choose 1–32 starting agents.");
     const config: RunConfig = {
+      webResearch: !!values.web,
       providerIds: ids,
       members: Array.from({ length: count }, (_, i) => ids[i % ids.length]).map(
         (providerId, i) => ({

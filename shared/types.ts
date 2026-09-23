@@ -28,6 +28,7 @@ export interface Member {
   reportsTo?: string;
 }
 export interface RunConfig {
+  webResearch?: boolean;
   sandbox?: boolean;
   members: Member[];
   providerIds: string[];

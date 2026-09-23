@@ -33,6 +33,10 @@ an approved command.
 
 ## Local and cloud models together
 
+For optional public research, add `--web` when launching or use `/web on` in the
+TUI. Page reading works with any model; search initially requires a selected direct
+OpenAI API connection. See [research tools, costs and limits](RESEARCH.md).
+
 ```sh
 council models add --name pod --kind vllm --model YOUR_SERVED_MODEL --url http://127.0.0.1:8000/v1
 council models add --name cloud --kind openai --model YOUR_OPENAI_MODEL

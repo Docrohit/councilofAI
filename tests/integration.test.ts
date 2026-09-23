@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { createApp } from "../server/app.ts";
 import { Bridge } from "../server/bridge.ts";
 import type { RunConfig } from "../shared/types.ts";
+import { extractPage } from "../server/research.ts";
 process.env.DEMO_DELAY_MS = "0";
 const pause = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 async function harness(work: (ctx: any) => Promise<void>) {
@@ -1013,6 +1014,175 @@ test("a team repeating status without evidence stops before exhausting its budge
         result.events.some(
           (e: any) =>
             e.type === "warning" && e.data.message.includes("concrete check"),
+        ),
+      );
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
+
+test("web research shares cached sources across peers, counts search calls and respects opt-in", async () => {
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      system = body.messages[0].content,
+      user = body.messages[1].content;
+    const board = JSON.parse(
+      user
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    const turn = Number(system.match(/\nTURN: (\d+)/)[1]);
+    const output =
+      turn === 1
+        ? {
+            tools: [
+              { name: "web_search", query: "primary source test" },
+              { name: "web_fetch", url: "https://example.org/docs" },
+            ],
+          }
+        : board.candidate
+          ? {
+              review: {
+                candidateId: board.candidate.id,
+                agree: true,
+                reason: "The retrieved page supports the conclusion.",
+              },
+            }
+          : {
+              proposal: {
+                answer:
+                  "Source result: [Primary source](https://example.org/docs).",
+                rationale: "Inspected retrieved page evidence.",
+              },
+            };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                content: "```council\n" + JSON.stringify(output) + "\n```",
+              },
+            },
+          ],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api, engine }: any) => {
+      let searches = 0,
+        pages = 0;
+      engine.research = {
+        searchWeb: async () => {
+          searches++;
+          return {
+            query: "primary source test",
+            text: "Retrieved source digest.",
+            sources: [
+              { url: "https://example.org/docs", title: "Primary source" },
+            ],
+            fetchedAt: new Date().toISOString(),
+            inputTokens: 3,
+            outputTokens: 4,
+          };
+        },
+        fetchPage: async () => {
+          pages++;
+          return extractPage(
+            "https://example.org/docs",
+            "text/plain",
+            "Primary source result.",
+          );
+        },
+      };
+      const auth = await api("/auth/signup", {
+        name: "Research fixture",
+        email: "research@example.test",
+        password: "long-password-123",
+      });
+      const local = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const search = await api(
+        "/providers",
+        {
+          name: "Search",
+          kind: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          model: "gpt-4o",
+          apiKey: "fixture-only",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const config = cfg([local.data.id], 2, {
+        concurrency: 1,
+        maxCalls: 8,
+        webResearch: true,
+      });
+      config.providerIds.push(search.data.id);
+      const start = await api(
+        "/runs",
+        { prompt: "Research a public source", config },
+        auth.cookie,
+      );
+      const result = await done(api, auth.cookie, start.data.id);
+      assert.equal(result.run.status, "completed");
+      assert.equal(searches, 1);
+      assert.equal(pages, 1);
+      assert.equal(
+        result.events.filter((e: any) => e.type === "research.start").length,
+        1,
+      );
+      assert.equal(
+        result.events.filter(
+          (e: any) => e.type === "tool.result" && e.data.cached,
+        ).length,
+        2,
+      );
+      assert.equal(
+        result.events.filter((e: any) => e.type === "board.post").length,
+        2,
+      );
+      assert.match(result.run.final, /https:\/\/example.org\/docs/);
+      const disabled = await api(
+        "/runs",
+        {
+          prompt: "Research disabled",
+          config: { ...config, webResearch: false },
+        },
+        auth.cookie,
+      );
+      const without = await done(api, auth.cookie, disabled.data.id);
+      assert.equal(searches, 1);
+      assert.equal(pages, 1);
+      assert.equal(
+        without.events.filter((e: any) => e.type === "research.start").length,
+        0,
+      );
+      assert.ok(
+        without.events.some(
+          (e: any) =>
+            e.type === "tool.error" && e.data.message.includes("disabled"),
         ),
       );
     });

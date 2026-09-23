@@ -22,6 +22,7 @@ policies do not imply that their infrastructure is implemented or live.
 
 ## Existing technical and user guides
 
+- [Chat attachments](ATTACHMENTS.md): main-chat uploads and extraction limits.
 - [Architecture](ARCHITECTURE.md): runtime modes, domain state, tools and roadmap.
 - [Benchmarks](BENCHMARKS.md): individual problems, custom proofs and saved comparisons.
 - [LSP and Skills](LSP_SKILLS.md): native configuration, tools and limitations.

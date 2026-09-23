@@ -1,3 +1,10 @@
+import { quickReply } from "./quick-reply.ts";
+import { prepareAttachment, attachmentName } from "./attachments.ts";
+import {
+  ATTACHMENT_MAX_BYTES,
+  ATTACHMENT_MAX_FILES,
+  type Attachment,
+} from "../shared/attachments.ts";
 import { sandboxRequest } from "./sandbox.ts";
 import express, {
   type Request,
@@ -300,6 +307,86 @@ export function createApp(directory: string, production = false) {
     res.locals.session = row.hash;
     next();
   });
+  const uploads = new Set<string>();
+  db.prepare("DELETE FROM attachments WHERE expires<?").run(Date.now());
+  app.post(
+    "/api/attachments",
+    (req, res, next) => {
+      const uid = userOf(res).id;
+      if (uploads.has(uid) || uploads.size >= 2) {
+        res
+          .status(429)
+          .json({ error: "File reader is busy. Try again shortly." });
+        return;
+      }
+      db.prepare("DELETE FROM attachments WHERE expires<?").run(Date.now());
+      const count = db
+        .prepare("SELECT count(*) AS n FROM attachments WHERE user_id=?")
+        .get(uid) as { n: number };
+      if (count.n >= 20) {
+        res.status(429).json({
+          error:
+            "Too many pending files. Remove attachments or try again after they expire in 24 hours.",
+        });
+        return;
+      }
+      try {
+        attachmentName(decodeURIComponent(req.get("X-File-Name") || ""));
+      } catch {
+        res
+          .status(400)
+          .json({ error: "Choose a .md, .txt, .pdf, .docx or .apk file." });
+        return;
+      }
+      if (!req.is("application/octet-stream")) {
+        res.status(415).json({ error: "Send a binary file upload." });
+        return;
+      }
+      uploads.add(uid);
+      res.locals.uploadAbort = new AbortController();
+      let reading = false;
+      res.locals.uploadStarted = () => {
+        reading = true;
+      };
+      res.once("close", () => {
+        res.locals.uploadAbort.abort();
+        if (!reading) uploads.delete(uid);
+      });
+      next();
+    },
+    express.raw({
+      type: "application/octet-stream",
+      limit: ATTACHMENT_MAX_BYTES,
+    }),
+    async (req, res) => {
+      const uid = userOf(res).id;
+      res.locals.uploadStarted();
+      try {
+        const item = await prepareAttachment(
+          req.body,
+          decodeURIComponent(req.get("X-File-Name")!),
+          res.locals.uploadAbort.signal,
+        );
+        if (res.destroyed) return;
+        db.prepare(
+          "INSERT INTO attachments(id,user_id,expires,data) VALUES(?,?,?,?)",
+        ).run(item.id, uid, Date.now() + 86400_000, JSON.stringify(item));
+        res.status(201).json(item);
+      } catch (e) {
+        if (!res.destroyed)
+          res.status(400).json({ error: (e as Error).message });
+      } finally {
+        uploads.delete(uid);
+      }
+    },
+  );
+  app.delete("/api/attachments/:id", (req, res) => {
+    db.prepare("DELETE FROM attachments WHERE id=? AND user_id=?").run(
+      req.params.id as string,
+      userOf(res).id,
+    );
+    res.json({ ok: true });
+  });
   app.get("/api/me", (_req, res) => res.json({ user: userOf(res) }));
   app.get("/api/sandbox", async (_req, res) => {
     if (!process.env.COUNCIL_SANDBOX_SOCKET) {
@@ -576,7 +663,7 @@ export function createApp(directory: string, production = false) {
     res.json(
       store
         .runs(userOf(res).id)
-        .map(({ sharedState, resumeState, ...run }) => run),
+        .map(({ sharedState, resumeState, attachments, ...run }) => run),
     ),
   );
   app.post("/api/runs", async (req, res) => {
@@ -586,10 +673,24 @@ export function createApp(directory: string, production = false) {
         prompt: z.string().trim().min(1).max(20_000),
         config: configSchema,
         parentId: z.string().optional(),
+        attachmentIds: z
+          .array(z.string().uuid())
+          .max(ATTACHMENT_MAX_FILES)
+          .default([]),
       })
       .parse(req.body);
     const config = data.config;
-    if (config.sandbox) {
+    const parent = data.parentId
+      ? store.getRun(userId, data.parentId)
+      : undefined;
+    if (data.parentId && !parent) {
+      res.sendStatus(404);
+      return;
+    }
+    const greeting =
+      !data.attachmentIds.length &&
+      quickReply({ prompt: data.prompt, attachments: parent?.attachments });
+    if (config.sandbox && !greeting) {
       const sandbox = await sandboxRequest(userId, { action: "status" });
       if (!sandbox.active) {
         res.status(400).json({
@@ -638,17 +739,38 @@ export function createApp(directory: string, production = false) {
       return;
     }
     let prompt = data.prompt;
-    if (data.parentId) {
-      const parent = store.getRun(userId, data.parentId);
-      if (!parent) {
-        res.sendStatus(404);
+    let attachments: Attachment[] = [];
+    for (const id of new Set(data.attachmentIds)) {
+      const row = db
+        .prepare(
+          "SELECT data FROM attachments WHERE id=? AND user_id=? AND expires>?",
+        )
+        .get(id, userId, Date.now()) as { data: string } | undefined;
+      if (!row) {
+        res.status(400).json({
+          error:
+            "An attachment expired or is unavailable. Please upload it again.",
+        });
         return;
       }
+      attachments.push(JSON.parse(row.data));
+    }
+    if (parent) {
+      attachments = [...(parent.attachments || []), ...attachments];
       prompt = `Previous goal:\n${parent.prompt.slice(0, 6000)}\nPrevious answer:\n${parent.final.slice(0, 6000)}\n\nCurrent follow-up:\n${data.prompt}`;
     }
+    if (attachments.length > ATTACHMENT_MAX_FILES) {
+      res.status(400).json({
+        error:
+          "A conversation can include up to four files. Start a new session for additional attachments.",
+      });
+      return;
+    }
     const run: Run = {
+      attachments,
       id: randomUUID(),
       title: data.prompt.slice(0, 70),
+      userMessage: data.prompt,
       prompt,
       config,
       createdAt: new Date().toISOString(),
@@ -658,6 +780,11 @@ export function createApp(directory: string, production = false) {
       parentId: data.parentId,
     };
     store.saveRun(userId, run);
+    for (const id of data.attachmentIds)
+      db.prepare("DELETE FROM attachments WHERE id=? AND user_id=?").run(
+        id,
+        userId,
+      );
     void engine
       .start(userId, run)
       .catch((error) => console.error("Run failure:", error.message));

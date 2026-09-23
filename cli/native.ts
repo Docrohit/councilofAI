@@ -1,3 +1,4 @@
+import { quickReply } from "../server/quick-reply.ts";
 import { createHash, randomUUID } from "node:crypto";
 import {
   mkdirSync,
@@ -282,11 +283,13 @@ export class NativeCouncil {
     config = structuredClone(config);
     if (!prompt.trim() || prompt.length > 20000)
       throw new Error("Enter a goal of 1–20000 characters.");
+    const greeting =
+      !resume && quickReply({ prompt, attachments: previous?.attachments });
     const models = this.syncModels();
     for (const id of config.providerIds) {
       const m = models.find((m) => m.id === id);
       if (!m) throw new Error(`Connection ${id} is no longer configured.`);
-      if (m.keyEnv && !modelKey(m))
+      if (!greeting && m.keyEnv && !modelKey(m))
         throw new Error(
           `Add a key in /connections, set ${m.keyEnv} before launching Council, or use another connection.`,
         );
@@ -294,6 +297,7 @@ export class NativeCouncil {
     const run: Run = {
       id: randomUUID(),
       title: prompt.slice(0, 70),
+      userMessage: resume && previous ? previous.userMessage : prompt,
       prompt:
         resume && previous
           ? previous.prompt

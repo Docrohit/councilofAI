@@ -439,3 +439,50 @@ test("native moves and deletes require current hashes, approval and recoverable 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("native greetings use no provider credentials, model or project tools", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "council-greeting-")),
+    previous = process.env.COUNCIL_CONFIG_DIR;
+  const project = path.join(dir, "project");
+  mkdirSync(project);
+  process.env.COUNCIL_CONFIG_DIR = path.join(dir, "config");
+  let council: NativeCouncil | undefined;
+  const events: any[] = [];
+  try {
+    saveModel({
+      id: "greeting",
+      kind: "compatible",
+      model: "fixture",
+      baseUrl: "http://127.0.0.1:1/v1",
+      keyEnv: "COUNCIL_UNSET_GREETING_FIXTURE_KEY",
+    });
+    council = new NativeCouncil(
+      project,
+      async () => {
+        throw new Error("No project approval expected");
+      },
+      path.join(dir, "data"),
+    );
+    const config = council.config(["greeting"], 3);
+    const hello = await council.run("hello", config, (e) => events.push(e));
+    assert.equal(hello.status, "completed");
+    assert.match(hello.final, /Hello!/);
+    const thanks = await council.run(
+      "thanks",
+      config,
+      (e) => events.push(e),
+      hello,
+    );
+    assert.match(thanks.final, /welcome/);
+    assert.equal(events.filter((e) => e.type === "turn.start").length, 0);
+    await assert.rejects(
+      council.run("hello, debug my code", config, () => {}),
+      /Add a key/,
+    );
+  } finally {
+    await council?.close();
+    if (previous) process.env.COUNCIL_CONFIG_DIR = previous;
+    else delete process.env.COUNCIL_CONFIG_DIR;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

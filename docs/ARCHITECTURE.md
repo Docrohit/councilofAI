@@ -809,3 +809,9 @@ and copy behavior are covered by
 Update the baseline and capability ledger when behavior changes. Distinguish
 source inspection, fixture tests, live provider checks and verified running
 releases. Planned designs are not evidence of shipped features.
+
+## Chat attachment context (v0.2.9 candidate)
+
+The web composer uploads owner-scoped document/APK extractions via `server/attachments.ts` and a bounded child reader. Drafts live in the additive `attachments` table; runs snapshot the extracted text and metadata. Every peer receives this as untrusted source material via `shared/attachments.ts`, including follow-ups and continuation. Original binaries are discarded. See [formats, limits and operations](ATTACHMENTS.md).
+
+`server/quick-reply.ts` recognizes only standalone greetings/thanks. The shared orchestrator completes these with a fixed reply and no peer/model/tool calls. Web and native run construction preserve the raw user message separately from follow-up context; attached files and resumed team state prevent this shortcut. Task-only sandbox/key availability checks are skipped for a greeting, while authentication, ownership and session admission remain enforced.

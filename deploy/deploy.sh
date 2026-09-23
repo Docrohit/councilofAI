@@ -97,7 +97,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/councilofai.nftforger.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/councilofai.nftforger.com/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    client_max_body_size 1m;
+    client_max_body_size 21m;
     location / {
         proxy_pass http://127.0.0.1:4310;
         proxy_set_header Host $host;

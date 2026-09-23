@@ -1,3 +1,5 @@
+import { ChatAttachments, AttachmentPreview } from "./ChatAttachments";
+import type { Attachment } from "../shared/attachments";
 import { BenchmarkWorkspace } from "./BenchmarkWorkspace";
 import { version as councilVersion } from "../package.json";
 import { ProjectWorkspace } from "./ProjectWorkspace";
@@ -784,6 +786,9 @@ export default function App() {
   const [events, setEvents] = useState<CouncilEvent[]>([]);
   const [config, setConfig] = useState<RunConfig>(defaults([]));
   const [prompt, setPrompt] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [draftKey, setDraftKey] = useState(0);
   const [tab, setTab] = useState("discussion");
   const [modal, setModal] = useState<
     "connections" | "team" | "files" | "cli" | "benchmarks" | "project" | null
@@ -812,6 +817,7 @@ export default function App() {
         setRun(null);
         setEvents([]);
         setPrompt("");
+        setDraftKey((k) => k + 1);
         setSidebar(false);
       }
     };
@@ -945,12 +951,13 @@ export default function App() {
     (id) => providers.find((p) => p.id === id)?.kind === "demo",
   );
   async function start(goal = prompt) {
-    if (!goal.trim()) return;
+    if (!goal.trim() || uploading || sending || active) return;
     setError("");
     setSending(true);
     try {
       const next = await api<Run>("/runs", "POST", {
         prompt: goal,
+        attachmentIds: attachments.map((a) => a.id),
         config,
         ...(run && !active ? { parentId: run.id } : {}),
       });
@@ -958,7 +965,7 @@ export default function App() {
       setRun(next);
       setEvents([]);
       setPrompt("");
-      setTab("discussion");
+      setTab(next.status === "completed" ? "answer" : "discussion");
       setRuns((old) => [next, ...old]);
       follow.current = true;
     } catch (e) {
@@ -972,6 +979,7 @@ export default function App() {
     setRun(null);
     setEvents([]);
     setPrompt("");
+    setDraftKey((k) => k + 1);
     setSidebar(false);
     setError("");
   }
@@ -1239,6 +1247,11 @@ export default function App() {
                     </summary>
                     <p>{run.prompt}</p>
                   </details>
+                  <div className="run-attachments">
+                    {run.attachments?.map((item) => (
+                      <AttachmentPreview key={item.id} item={item} />
+                    ))}
+                  </div>
                   <div className="session-tabs">
                     <button
                       className={tab === "discussion" ? "active" : ""}
@@ -1452,6 +1465,13 @@ export default function App() {
                   start();
                 }}
               >
+                <ChatAttachments
+                  key={`${run?.id || "new"}-${draftKey}`}
+                  disabled={active || sending}
+                  inherited={run?.attachments?.length || 0}
+                  onChange={setAttachments}
+                  onBusy={setUploading}
+                />
                 <textarea
                   aria-label="Your goal"
                   placeholder={
@@ -1506,7 +1526,12 @@ export default function App() {
                     <button
                       className="send-button"
                       aria-label="Start council"
-                      disabled={!prompt.trim() || sending || !providers.length}
+                      disabled={
+                        !prompt.trim() ||
+                        sending ||
+                        uploading ||
+                        !providers.length
+                      }
                     >
                       {sending ? (
                         <LoaderCircle size={19} className="spin" />

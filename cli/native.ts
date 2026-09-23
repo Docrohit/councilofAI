@@ -16,6 +16,7 @@ import { openDb } from "../server/db.ts";
 import { Store } from "../server/store.ts";
 import { Orchestrator } from "../server/orchestrator.ts";
 import { LocalProject } from "./project.ts";
+import { readNativeKey, saveNativeKey } from "./credentials.ts";
 import { validateEndpoint } from "../server/security.ts";
 import type {
   CouncilEvent,
@@ -59,11 +60,22 @@ export function loadModels(): NativeModel[] {
 export function saveModel(input: unknown) {
   const model = modelSchema.parse(input);
   validateEndpoint(model.baseUrl, false);
-  const models = loadModels().filter((m) => m.id !== model.id);
+  const all = loadModels();
+  const previous = all.find((m) => m.id === model.id);
+  const models = all.filter((m) => m.id !== model.id);
   models.push(model);
   if (models.length > 20)
     throw new Error("At most 20 model connections are supported.");
   const directory = nativeConfigDirectory();
+  if (
+    previous &&
+    (previous.baseUrl !== model.baseUrl || previous.kind !== model.kind)
+  ) {
+    saveNativeKey(directory, model.id, "");
+    // An old environment binding is a credential too. Rebind it explicitly
+    // after saving the new endpoint, never implicitly forward it to a new host.
+    delete model.keyEnv;
+  }
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const file = path.join(directory, "native-models.json");
   writeFileSync(file, JSON.stringify(models, null, 2) + "\n", { mode: 0o600 });
@@ -71,6 +83,7 @@ export function saveModel(input: unknown) {
   return model;
 }
 export function removeModel(id: string) {
+  saveNativeKey(nativeConfigDirectory(), id, "");
   const directory = nativeConfigDirectory(),
     file = path.join(directory, "native-models.json");
   const models = loadModels().filter((m) => m.id !== id);
@@ -78,6 +91,9 @@ export function removeModel(id: string) {
   writeFileSync(file, JSON.stringify(models, null, 2) + "\n", { mode: 0o600 });
   chmodSync(file, 0o600);
 }
+export const modelKey = (model: NativeModel) =>
+  readNativeKey(nativeConfigDirectory(), model.id) ||
+  (model.keyEnv ? process.env[model.keyEnv] || "" : "");
 export const nativeDefaults: Record<string, { url: string; keyEnv?: string }> =
   {
     openai: { url: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
@@ -183,7 +199,7 @@ export class NativeCouncil {
         transport: "direct",
         reasoning: false,
       };
-      const secret = model.keyEnv ? process.env[model.keyEnv] || "" : "";
+      const secret = modelKey(model);
       this.db
         .prepare(
           "INSERT INTO providers(id,user_id,config,secret) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET config=excluded.config,secret=excluded.secret",
@@ -270,9 +286,9 @@ export class NativeCouncil {
     for (const id of config.providerIds) {
       const m = models.find((m) => m.id === id);
       if (!m) throw new Error(`Connection ${id} is no longer configured.`);
-      if (m.keyEnv && !process.env[m.keyEnv])
+      if (m.keyEnv && !modelKey(m))
         throw new Error(
-          `Set ${m.keyEnv} in your shell before starting Council, or use another connection.`,
+          `Add a key in /connections, set ${m.keyEnv} before launching Council, or use another connection.`,
         );
     }
     const run: Run = {

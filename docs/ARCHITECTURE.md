@@ -1,10 +1,15 @@
 # Council of AI architecture
 
-**Version:** **0.2.5**. Core reviewed at `d66ddc6` (0.2.4), with the 0.2.5
-answer-readability changes included; inspected **2026-09-23**.
+**Version:** **0.2.6 candidate source**, updated **2026-09-23**. Builds on the
+0.2.5 baseline (`ef0a1da`); release approval/deployment must be verified separately.
 This document describes that implementation, followed by a
 separate extension plan. It does not claim that every installation is running
 that revision or that Council has reached full OpenCode parity.
+
+The [documentation index](README.md) links the owner-confirmed development and
+business plans. Staging, daily allowances, paid credits, BYOK activation,
+native desktop apps and PostgreSQL remain future work. See
+[known issues](KNOWN_ISSUES.md) for candidate-review recovery defects.
 
 Council is an independent multi-model work harness. It combines a peer
 collaboration engine, model connections, tools, durable sessions, a responsive
@@ -53,15 +58,15 @@ Organizational freedom does not authorize a model to change those controls.
 | Hosted coding                                                 | Opt-in temporary, isolated, networkless Node workspace              |
 | Exact maths                                                   | Arithmetic, bounded factorization and linear systems                |
 | Web research                                                  | Off by default; public page reads and selected OpenAI-backed search |
-| LSP                                                           | **Requested next; not implemented**                                 |
+| LSP                                                           | Native stdio diagnostics/navigation; hosted integration pending     |
 | MCP                                                           | **Planned; not implemented**                                        |
-| Agent Skills / `SKILL.md` loading                             | **Planned; not implemented**                                        |
+| Agent Skills / `SKILL.md` loading                             | Native project Skills discovery and paged loading                   |
 | Interactive slash-command picker                              | **Planned**; typed slash commands work                              |
 | Persistent hosted repositories, embedded web PTY, rich editor | **Unfinished**                                                      |
 | Proven superiority over a single model                        | **Not established**                                                 |
 
 Reading `AGENTS.md` project instructions and recording peer “skill assessments”
-are existing features. Neither implements the Agent Skills format. More agents
+are existing features distinct from native Agent Skills loading. More agents
 are an experiment in collaboration, not a guarantee of better answers. See the
 [coding capability ledger](CODING.md#capability-status).
 
@@ -333,7 +338,9 @@ status/absence messaging while pending; Discussion is the live work view.
 Provider failure first attempts another selected provider while retaining the
 agent's identity, task, partial public output and inbox. If unavailable, that peer
 is marked unavailable and unfinished work is offered to another available peer.
-Claims and objections remain. There is no predictive cost-aware routing,
+Finding and conversation state remain, but an unavailable peer's negative
+final-candidate review can cease blocking completion in the current code; see
+[known issues](KNOWN_ISSUES.md). There is no predictive cost-aware routing,
 persistent circuit breaker or guarantee of equivalent replacement-model ability.
 
 **Continue** creates a child run with fresh budgets and saved peers, tasks,
@@ -587,6 +594,9 @@ fourteen snapshots. Off-server copies/restore drills are operator responsibiliti
 Preserve database and encryption key together. Native project files need their
 own backup; Council history does not include a full copy of the source tree.
 
+`council upgrade` updates clean native Git installs; `--web` also builds the UI.
+Managed release installs use their pipeline. See [upgrade guide](UPGRADING.md).
+
 Self-hosted upgrades should finish/stop work, export temporary projects, inspect
 the working tree, back up data/key, fast-forward a clean installation, install
 locked dependencies, build/test as appropriate, restart and verify revision and
@@ -611,6 +621,11 @@ These are future changes, not deployment options implemented today.
 | `scripts/verify-sandbox.mjs`         | Actual Docker execution/isolation                                             |
 | `scripts/verify-council-sandbox.mjs` | Scripted peers through the real API and Docker tools                          |
 | Benchmarks                           | Paired council/single-model tasks with deterministic scoring                  |
+
+The web comparison defaults to one problem at a time, with a custom-problem mode
+and independent-review grading for proofs. Reports retain complete answers and
+problem/model/reference snapshots; references are excluded from solver prompts.
+See [benchmark guide](BENCHMARKS.md).
 
 Benchmarks allow a one-call baseline or sequential self-review matched to the
 council's actual turn count, repetitions, elapsed time and provider-reported tokens. The thirteen
@@ -637,9 +652,9 @@ records, latency and cost. That broader evaluation is not implemented here.
 
 ## 15. Planned LSP, MCP and skills
 
-**This entire section is proposed design, not shipped behavior.** The current
-request prioritizes documenting architecture; LSP is explicitly requested next.
-MCP and skills remain extension plans, implemented through Council's own runtime.
+**Native LSP and project Skills are now implemented in this candidate source.**
+See [configuration and supported operations](LSP_SKILLS.md). Web LSP/Skills and MCP
+remain planned. The remaining design below identifies later extensions.
 
 ### Shared tool boundary
 
@@ -652,32 +667,25 @@ Record requesting agent, exact arguments, source/file version, result/error and
 permission. Handle uncertain external side effects explicitly; automatic retries
 must not duplicate writes or remote actions.
 
-### LSP: first planned addition
+### LSP: native foundation and further work
 
 LSP standardizes editor/tool communication with language servers for features
 such as definitions, references and completion.
 [Official LSP overview](https://microsoft.github.io/language-server-protocol/).
 
-**Proposed Council design:** a project-owned language-service manager, sharing
-one server per project/language configuration across peers. Run servers where
-the files live. Start with explicitly configured installed servers in native
-mode; hosted support requires a separate image/runtime decision.
+The native project owns a language-service manager shared by all peers. It reads
+user configuration outside the project, requests command permission, and starts
+installed stdio servers without downloading them. It exposes status, diagnostics,
+hover, definitions and references through agent tools and typed TUI commands.
+Opened files are refreshed before requests; changes use versioned full/incremental
+synchronization. Timeouts, cancellation and shutdown bound process lifetime.
+Server-initiated edits are denied. Results preserve version/provenance, and
+pending/unversioned diagnostics carry an explicit limitation.
 
-First expose diagnostics, hover, definitions, references and symbols to agents,
-and diagnostics in TUI. Synchronize document open/change/close and file versions;
-attach versions to results and discard stale diagnostics. Share useful findings
-so five peers do not launch five servers or repeat indexing.
-
-Keep navigation read-only initially. Later rename/code actions must use approvals,
-path checks and stale-edit protection, including multi-file changes. Explicitly
-handle shutdown, cancellation, crashes and unsupported capabilities. Language
-servers may execute project tooling; their launch configuration needs trust.
-
-Acceptance: locate a cross-file definition in a disposable project, detect an
-introduced error, clear the diagnostic after an approved fix, reject stale or
-out-of-project edits, recover from a server crash, and prove two peers share a
-service. This does not imply full IDE parity, universal auto-installation or
-hosted LSP support.
+Language servers have the operator's OS access; approved launch is not sandboxing.
+Hosted support needs its own image/runtime decision. Symbols, completion,
+rename/code actions, formatting, editor overlays and full unopened-file watching
+remain future work. Edits must retain permission and stale-write protections.
 
 ### MCP
 
@@ -701,18 +709,32 @@ Agent Skills package instructions in `SKILL.md` with metadata and optional
 scripts/resources, distinct from MCP's external tool interface.
 [Agent Skills specification](https://agentskills.io/specification).
 
-**Proposed Council design:** discover approved user/project directories, validate
-metadata, list names/descriptions, and load full instructions only when selected
-or relevant. Record the skill path/version per agent; expose active skills and
-enable/disable controls in web/TUI. Directory precedence and update/distribution
-policy remain to be decided.
-
-Scripts run through existing permissions; loading instructions grants no new
-execution authority. Test malformed metadata, naming conflicts, path escape,
-disabled skills and denied execution. `AGENTS.md` remains a separate project
-instruction mechanism.
+Native discovery now scans `.agents/skills/*/SKILL.md` through safe project-file
+discovery. It validates YAML metadata, exposes bounded descriptions, then loads
+instruction bodies and supporting text in pages with path/hash provenance.
+Scripts require existing command permission; `allowed-tools` grants none.
+The typed `/skills` and `/skill` commands expose the same operations to the user.
+Global directories, persistent activation controls, web Skills management and
+install/distribution policy remain future work. `AGENTS.md` remains distinct.
 
 ### Subsequent milestones
+
+**Deferred by user on 2026-09-23: evidence labels on the shared board.**
+Keep the current board behavior until this is explicitly resumed. Proposed scope:
+
+- Label updates, findings, deductions, observed evidence and reviewed conclusions.
+- Show the posting agent and any coauthors/reviewers to users and other agents.
+- Attach inspectable supporting evidence; distinguish agent claims and peer
+  agreement from deterministic verification. A model cannot certify its own
+  statement as proven merely by selecting a label.
+- Surface substantive findings and reviewed conclusions on the shared board,
+  keeping them discoverable beyond the latest twenty posts.
+- Design how every peer receives important evidence and corrections, including
+  late-joining agents, without implying that delivery guarantees comprehension.
+- Mark disputed or superseded evidence so old conclusions are not silently reused.
+
+No implementation from the deferred attempt is retained. Labels, proof handling
+and delivery details remain proposals requiring design and tests when resumed.
 
 Separately plan skills/MCP, slash picker, persistent hosted projects, native
 project access from web, richer editor/PTY, context management, branching/rollback

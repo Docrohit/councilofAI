@@ -83,7 +83,9 @@ Tab/Shift+Tab switches Activity, Board, Conversations, Tools, Files, Answer and
 Help. PageUp/PageDown scrolls; End follows output. Escape stops active work.
 In the editor, Ctrl+S saves, Ctrl+Z undoes, Ctrl+Y redoes, and Escape closes it
 (with a second confirmation for discarding edits). This is a plain text editor;
-syntax intelligence, LSP diagnostics, mouse selection and rich diffs are pending.
+inline syntax intelligence, mouse selection and rich diffs are pending.
+Read-only LSP diagnostics/navigation and project Skills are available through
+[/lsp, /skills and /skill](LSP_SKILLS.md).
 
 Model selection and agent-count changes apply to subsequent goals. Resuming
 restores that session's team configuration. Model connections and session data
@@ -137,7 +139,9 @@ Provider keys are encrypted in that local DB. `COUNCIL_CONFIG_DIR` and
 `COUNCIL_DATA_HOME` override those locations. One Council process may own a
 project's history at a time. Interrupted teams can be resumed after restart.
 
-To update a clean installation, stop Council, enter its installation checkout:
+The preferred update is `council upgrade` (`--web` also builds the web UI);
+`council upgrade --check` checks first. See [upgrade rules and limitations](UPGRADING.md).
+For older installations without that command, stop Council and enter its installation checkout:
 
 ```sh
 git status --short
@@ -164,7 +168,7 @@ They validate harness behavior, not model quality.
 
 See [capability status](CODING.md#capability-status) for missing features. The next
 major gaps include persistent repo access from the web, embedded interactive PTY,
-LSP/MCP/plugins, richer session management and automated project rollback. There
+MCP/plugins, hosted LSP/Skills, richer session management and automated project rollback. There
 is no claim of full parity or benchmark superiority in this release.
 
 ## Additional coding and maths tools

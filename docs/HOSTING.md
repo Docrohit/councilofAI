@@ -1,5 +1,9 @@
 # Hosting Council
 
+See [deployment rules](../deploy_rules.md) for the owner-required independent
+review and production approval policy. The staging promotion workflow is planned;
+the pipeline described below is the current implementation.
+
 Council is currently a **single-server alpha**. It can be packaged for a private beta, but it is not an audited, production-hardened public SaaS. There is no billing, email verification, password reset, MFA, admin console, or abuse-response workflow yet.
 
 ## Server configuration

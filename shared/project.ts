@@ -1,4 +1,14 @@
 export type ProjectAction =
+  | {
+      action: "lsp";
+      operation:
+        "status" | "diagnostics" | "hover" | "definition" | "references";
+      path?: string;
+      line?: number;
+      character?: number;
+    }
+  | { action: "skills"; offset?: number }
+  | { action: "skill"; name: string; resource?: string; offset?: number }
   | { action: "tree" | "diff" }
   | { action: "read"; path: string; offset?: number }
   | { action: "search"; query: string }
@@ -16,6 +26,7 @@ export type ProjectAction =
 export interface ProjectRuntime {
   directory: string;
   instructions(): Promise<string>;
+  toolsContext?(): Promise<string>;
   execute(action: ProjectAction, signal: AbortSignal): Promise<any>;
 }
 export interface ProjectPermission {

@@ -1,10 +1,19 @@
 """Exercise Council's actual terminal UI in a disposable pseudoterminal."""
-import os, pty, select, signal, subprocess, tempfile, time, shutil, pathlib
+import os, pty, select, signal, subprocess, tempfile, time, shutil, pathlib, json
 root = pathlib.Path(__file__).resolve().parents[1]
 folder = pathlib.Path(tempfile.mkdtemp(prefix='council-tui-'))
 project = folder / 'project'
 project.mkdir()
 (project / 'sample.txt').write_text('original')
+(project / 'sample.ts').write_text('const n = 1;')
+skill = project / '.agents' / 'skills' / 'fixture'
+skill.mkdir(parents=True)
+body = 'Inspect the actual evidence.'
+body += 'x' * (8000 - len(body)) + 'SECOND_PAGE_INSTRUCTIONS'
+(skill / 'SKILL.md').write_text('---\nname: fixture\ndescription: PTY skill check\n---\n' + body)
+config = folder / 'config'
+config.mkdir()
+(config / 'lsp.json').write_text(json.dumps([{'id': 'fixture', 'command': shutil.which('node'), 'args': ['-e', 'setInterval(()=>{},1000)'], 'languages': {'.ts': 'typescript'}}]))
 master, slave = pty.openpty()
 env = dict(os.environ, COUNCIL_CONFIG_DIR=str(folder / 'config'), COUNCIL_DATA_HOME=str(folder / 'data'), TERM='xterm-256color')
 process = subprocess.Popen([shutil.which('node'), str(root / 'bin/council.mjs'), '--agents', '5', '--max-calls', '40'], cwd=project, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
@@ -50,10 +59,22 @@ try:
     send('/agents 6\r')
     wait_for('Agent count updated')
     assert b'6 agents' in seen and b'0/60 calls' in seen
+    send('/skills\r')
+    wait_for('PTY skill check')
+    send('/skill fixture\r')
+    wait_for('"nextOffset": 8000')
+    send('/skill fixture - 8000\r')
+    wait_for('SECOND_PAGE_INSTRUCTIONS')
+    send('/lsp diagnostics sample.ts\r')
+    wait_for('Start language server')
+    send('y')
+    wait_for('Reading project tools')
+    send('\x1b')
+    wait_for('LSP request cancelled.')
     send('/quit\r')
     wait_for('\x1b[?1049l')
     assert process.wait(timeout=10) == 0
-    print('Verified actual standalone TUI: launch in current directory, built-in editor, permission prompt, real file save, model selection and budget preservation, terminal exit. No OpenCode or model calls.')
+    print('Verified actual standalone TUI: launch in current directory, built-in editor, permission prompt, real file save, model selection and budget preservation, paged Skills, LSP permission and cancellation, terminal exit. No OpenCode or model calls.')
 finally:
     if process.poll() is None:
         os.killpg(process.pid, signal.SIGKILL)

@@ -1,7 +1,8 @@
 # Council documentation
 
 Documentation draft assembled 2026-09-23 from source and the owner's interview.
-Current implementation baseline: `ef0a1da`, v0.2.5. Planned business and release
+Initial implementation baseline: `ef0a1da`, v0.2.5. Feature guides and architecture
+now describe the v0.2.6 candidate source; its deployment is a separate release gate. Planned business and release
 policies do not imply that their infrastructure is implemented or live.
 
 ## Start here
@@ -22,6 +23,9 @@ policies do not imply that their infrastructure is implemented or live.
 ## Existing technical and user guides
 
 - [Architecture](ARCHITECTURE.md): runtime modes, domain state, tools and roadmap.
+- [Benchmarks](BENCHMARKS.md): individual problems, custom proofs and saved comparisons.
+- [LSP and Skills](LSP_SKILLS.md): native configuration, tools and limitations.
+- [Upgrading](UPGRADING.md): one-command native/self-hosted updates.
 - [Native CLI/TUI](NATIVE.md): model configuration, local projects and upgrades.
 - [Coding](CODING.md): native/hosted capabilities and exact limitations.
 - [Communication](COMMUNICATION.md): broadcasts, direct threads and shared conclusions.

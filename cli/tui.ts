@@ -42,6 +42,11 @@ Enter a goal to let your agents work in this directory.
 /agents 5                               Five agents, independent of model count
 /budget 40                              Maximum Council model calls
 /web on | off                           Enable/disable public web research
+/skills [OFFSET]                       List project Skills
+/skill NAME [RESOURCE|-] [OFFSET]       Read paged skill instructions or resources
+/lsp status                            Show configured language servers
+/lsp diagnostics PATH                  Read language-server diagnostics
+/lsp hover|definition|references PATH LINE COLUMN  Inspect a symbol (one-based)
 /concurrency 1                          Concurrent agents (start with one for coding)
 /limits 12 3                            Total agents and spawn depth; unlimited allowed
 /files                                  Browse the project file list
@@ -74,7 +79,8 @@ Writes and commands ask permission. Local shell commands have your OS access;
 the project path is not a sandbox. Public output and files read by agents go to
 the selected model providers. Session history stays in your local Council data folder.
 Web research is opt-in: /web on. Search uses a selected OpenAI API connection.
-PDF/Word parsing, interactive browsing, LSP and MCP integrations remain pending.
+LSP servers require configuration and command permission. Skills are project-local.
+PDF/Word parsing, interactive browsing and MCP integrations remain pending.
 `;
 export interface TuiOptions {
   webResearch?: boolean;
@@ -413,6 +419,64 @@ export async function startTui(options: TuiOptions) {
       });
       configure();
       notice = `Saved ${id}. ${keyEnv || defaults.keyEnv ? `Key source: ${keyEnv || defaults.keyEnv}. Restart Council after exporting it.` : "No API key required by this configuration."}`;
+      return;
+    }
+    if (cmd === "skills" || cmd === "skill" || cmd === "lsp") {
+      busy = true;
+      manualController = new AbortController();
+      status = "Reading project tools";
+      draw();
+      try {
+        const signal = manualController.signal;
+        let result;
+        if (cmd === "skills")
+          result = await council.project.execute(
+            { action: "skills", offset: Number(words[0] || 0) },
+            signal,
+          );
+        else if (cmd === "skill")
+          result = await council.project.execute(
+            {
+              action: "skill",
+              name: words[0] || "",
+              resource: words[1] === "-" ? undefined : words[1],
+              offset: Number(words[2] || 0),
+            },
+            signal,
+          );
+        else {
+          const operation = words[0] || "status";
+          if (
+            ![
+              "status",
+              "diagnostics",
+              "hover",
+              "definition",
+              "references",
+            ].includes(operation)
+          )
+            throw new Error(
+              "Use /lsp status|diagnostics|hover|definition|references [PATH LINE COLUMN].",
+            );
+          result = await council.project.execute(
+            {
+              action: "lsp",
+              operation: operation as "status",
+              path: words[1],
+              line: Number(words[2]),
+              character: Number(words[3]),
+            },
+            signal,
+          );
+        }
+        filesContent = JSON.stringify(result, null, 2);
+        tab = 4;
+        scroll = 0;
+      } finally {
+        busy = false;
+        manualController = undefined;
+        status = "Ready";
+      }
       return;
     }
     if (cmd === "models") {

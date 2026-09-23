@@ -11,7 +11,8 @@ Council is a personal, self-hostable multi-LLM orchestration project with a mobi
 Read the [full architecture](docs/ARCHITECTURE.md) for execution modes, peer
 collaboration, tools, storage, security, deployment and the planned LSP/MCP/skills
 integrations. [Web research](docs/RESEARCH.md) is available as an opt-in feature;
-LSP, MCP and Agent Skills loading remain unimplemented.
+Native LSP and project Skills loading are included in the current candidate source;
+MCP and hosted LSP/Skills remain planned. See [setup](docs/LSP_SKILLS.md).
 
 For development and planning, start with the [documentation index](docs/README.md)
 and [Council task prompts](PROMPTS/README.md). The business and release plans
@@ -37,7 +38,7 @@ council --providers local --agents 5
 Requires Node.js 22.18+. Use `/connect` and `/use` for mixed local/cloud models,
 `/files`, `/edit`, `/diff` and `/shell` for project work, and `/history` or
 `/resume` for saved sessions. Agents request permission before editing files or
-running commands. See [native setup and upgrades](docs/NATIVE.md).
+running commands. See [native setup](docs/NATIVE.md) and [one-command upgrades](docs/UPGRADING.md).
 **Full OpenCode parity is still unfinished**; see the [capability table](docs/CODING.md#capability-status).
 
 ## Start the web app locally
@@ -106,7 +107,7 @@ If a provider fails, Council can move the same agent identity to another selecte
 
 ## Benchmarks
 
-The web benchmark screen compares the council with a single-model baseline on identical tasks. Choose one baseline call or give the baseline the same number of calls for sequential self-review. Reports record deterministic correctness, calls, elapsed time, and provider-reported tokens when available. Equal calls do not imply equal compute or cost.
+The [web benchmark screen](docs/BENCHMARKS.md) runs one problem at a time or a batch, supports pasted proof problems with independent review, and shows both full answers. It compares the council with a single-model baseline on identical tasks. Choose one baseline call or give the baseline the same number of calls for sequential self-review. Reports record deterministic correctness, calls, elapsed time, and provider-reported tokens when available. Equal calls do not imply equal compute or cost.
 
 The default thirteen original tasks are integration smoke tests, not evidence of general reasoning superiority. To prepare a reproducible sample from the official GSM8K test set:
 
@@ -175,7 +176,7 @@ For real repositories, the standalone Council CLI/TUI executes its own file and
 command tools in the selected directory. Its text editor includes save, undo and
 redo. The hosted Coding project uses an isolated temporary Docker container with
 a file tree, editor and noninteractive command console. Persistent web repositories,
-embedded PTY, native LSP/MCP and advanced rollback remain unfinished. The OpenCode
+embedded PTY, hosted LSP, MCP and advanced rollback remain unfinished. The OpenCode
 adapter is optional. See [Coding](docs/CODING.md) for exact limits.
 
 ## Verification

@@ -21,6 +21,7 @@ import {
   Benchmarks,
   benchmarkSuite,
   benchmarkMetadata,
+  benchmarkTaskSchema,
   type BenchmarkResult,
 } from "./benchmarks.ts";
 import { complete } from "./providers.ts";
@@ -93,6 +94,16 @@ export function createApp(directory: string, production = false) {
     if (b.status === "running") {
       b.status = "failed";
       b.error = "Server restarted; partial rows are preserved.";
+      delete b.progress;
+      for (const item of b.rows || []) {
+        if (["pending", "running"].includes(item.baseline?.status)) {
+          item.baseline.status = "failed";
+          item.baseline.correct = null;
+          item.baseline.error =
+            "Server restarted before the baseline finished.";
+          item.baseline.reason = item.baseline.error;
+        }
+      }
       benchmarks.save(row.user_id, b);
     }
   }
@@ -460,6 +471,14 @@ export function createApp(directory: string, production = false) {
   app.get("/api/benchmarks", (_req, res) =>
     res.json(benchmarks.list(userOf(res).id)),
   );
+  app.get("/api/benchmarks/:id", (req, res) => {
+    const report = benchmarks.get(userOf(res).id, req.params.id as string);
+    if (!report) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json(report);
+  });
   app.post("/api/benchmarks", (req, res) => {
     const userId = userOf(res).id;
     const data = z
@@ -468,7 +487,8 @@ export function createApp(directory: string, production = false) {
         baselineProviderId: z.string(),
         baselineMode: z.enum(["single", "matched"]).default("single"),
         repeats: z.number().int().min(1).max(3).default(1),
-        taskIds: z.array(z.string()).min(1).max(10),
+        taskIds: z.array(z.string()).max(10).default([]),
+        customTasks: z.array(benchmarkTaskSchema).max(10).default([]),
       })
       .parse(req.body);
     if (
@@ -484,7 +504,15 @@ export function createApp(directory: string, production = false) {
     }
     const providers = store.providers(userId);
     const selected = [...data.config.providerIds, data.baselineProviderId];
+    const tasks = [
+      ...data.taskIds.map((id) => benchmarkSuite.find((t) => t.id === id)),
+      ...data.customTasks,
+    ];
     if (
+      tasks.length < 1 ||
+      tasks.length > 10 ||
+      tasks.some((t) => !t) ||
+      new Set(tasks.map((t) => t?.id)).size !== tasks.length ||
       selected.some(
         (id) =>
           !providers.some(
@@ -509,11 +537,15 @@ export function createApp(directory: string, production = false) {
     }
     // Model-only comparisons must not grant tools exclusively to the council.
     data.config.sandbox = false;
+    data.config.webResearch = false;
+    const { customTasks, ...settings } = data;
     const result: BenchmarkResult = {
       id: randomUUID(),
       status: "running",
       createdAt: new Date().toISOString(),
-      ...data,
+      ...settings,
+      taskIds: tasks.map((t) => t!.id),
+      tasks: tasks.map((t) => t!),
       rows: [],
     };
     benchmarks.save(userId, result);

@@ -112,7 +112,8 @@ restore the active candidate/reviews. Do not describe these as fixed. See
 [known issues](docs/KNOWN_ISSUES.md).
 
 Planned commercial accounts/trials, billing, PostgreSQL, native desktop apps,
-LSP, MCP and Skills loading are not implemented. Current standalone native mode
+MCP and hosted LSP/Skills are not implemented. Native LSP and project Skills are
+implemented in the candidate source; see docs/LSP_SKILLS.md. Current standalone native mode
 is account-free. Evidence labels for the board remain explicitly deferred.
 
 At handoff report the changed files, reasoning, tests actually run, review status,

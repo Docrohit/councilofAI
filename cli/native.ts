@@ -320,6 +320,7 @@ export class NativeCouncil {
       await new Promise((r) => setTimeout(r, 20));
     if (this.engine.active.size)
       throw new Error("Council is still stopping; project lock retained.");
+    await this.project.lsp.close();
     this.db.close();
     unlinkSync(this.lockFile);
   }

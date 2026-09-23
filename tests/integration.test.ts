@@ -496,9 +496,11 @@ test("a failed provider hands the same agent and partial context to another sele
   }
 });
 test("benchmark compares council and single-model refinement with deterministic grading and isolation", async () => {
+  const requests: string[] = [];
   const model = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
+    requests.push(raw);
     const body = JSON.parse(raw);
     const user = body.messages[1].content;
     let text = "FINAL_ANSWER: 1647";
@@ -588,6 +590,66 @@ test("benchmark compares council and single-model refinement with deterministic 
         (await api("/benchmarks", undefined, other.cookie)).data,
         [],
       );
+      assert.equal(
+        (await api(`/benchmarks/${report.id}`, undefined, other.cookie)).status,
+        404,
+      );
+      assert.equal(
+        (await api(`/benchmarks/${report.id}`, undefined, a.cookie)).data.id,
+        report.id,
+      );
+      assert.equal(report.tasks[0].prompt, "Compute 37 * 48 - 129.");
+      assert.equal(report.models.baseline.model, "fixture");
+      assert.equal(report.taskSha256.length, 64);
+      const custom = {
+        id: "proof-1",
+        domain: "math",
+        prompt: "Prove the stated two-condition functional equation.",
+        expected: "PRIVATE_REFERENCE_MUST_NOT_REACH_SOLVERS",
+        grading: "manual",
+        source: "user reference",
+      };
+      const startCustom = await api(
+        "/benchmarks",
+        {
+          config: cfg([p.data.id], 2, {
+            concurrency: 1,
+            webResearch: true,
+            sandbox: true,
+          }),
+          baselineProviderId: p.data.id,
+          customTasks: [custom],
+        },
+        a.cookie,
+      );
+      assert.equal(startCustom.status, 201);
+      while (benchmarks.active.size) await pause();
+      const proof = (
+        await api(`/benchmarks/${startCustom.data.id}`, undefined, a.cookie)
+      ).data;
+      assert.equal(proof.rows[0].council.correct, null);
+      assert.equal(proof.rows[0].baseline.correct, null);
+      assert.equal(proof.summary.scoredTasks, 0);
+      assert.equal(proof.summary.councilAccuracy, null);
+      assert.equal(proof.summary.reviewTasks, 1);
+      assert.equal(proof.tasks[0].expected, custom.expected);
+      assert.equal(proof.suite.name, "Custom comparison");
+      assert.equal(proof.config.webResearch, false);
+      assert.equal(proof.config.sandbox, false);
+      assert.equal(
+        requests.some((raw) => raw.includes(custom.expected)),
+        false,
+      );
+      const invalid = await api(
+        "/benchmarks",
+        {
+          config: cfg([p.data.id], 2),
+          baselineProviderId: p.data.id,
+          customTasks: [custom, custom],
+        },
+        a.cookie,
+      );
+      assert.equal(invalid.status, 400);
     });
   } finally {
     model.closeAllConnections();

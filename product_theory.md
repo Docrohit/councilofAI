@@ -83,7 +83,8 @@ credits for managed models; once-per-account BYOK activation. See the
 [business plan](docs/BUSINESS_ARCHITECTURE.md). These do not exist in v0.2.5.
 
 Prioritize consensus recovery, bounded context and evidence-based evaluation.
-Extract a typed tool boundary before expanding LSP/MCP/Skills. Keep the
+The native LSP/Skills foundation is now implemented in candidate source. Extract
+a typed tool registry before adding broader integrations such as MCP. Keep the
 deferred board-evidence labelling proposal as a plan. Full OpenCode parity,
 persistent hosted repositories and rich editor/PTY features remain unfinished.
 

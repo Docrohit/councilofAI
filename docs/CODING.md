@@ -10,21 +10,22 @@ files, nested folders and project instructions, rather than a single upload.
 
 ## Capability status
 
-| Capability                                                      | Native Council today                                            | Remaining work                                                          |
-| --------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Model/API selection, mixed local/cloud, independent agent count | Native CLI/TUI and web                                          | Provider discovery, OAuth and broader model-specific validation         |
-| Board, direct peer conversations, evidence/disputes, delegation | Same Council engine in native and web                           | Real-model quality and scale evaluations                                |
-| Files, search, edits, patches, commands and tests               | Native project tools with approvals                             | Richer navigation, semantic search and rollback                         |
-| Terminal UI                                                     | Own TUI, no OpenCode executable                                 | Mouse, richer layouts and command palette                               |
-| Editor                                                          | Own text editor with save/undo/redo; optional external editor   | Syntax intelligence, LSP and advanced diffs                             |
-| Terminal                                                        | Approved commands and a handoff to an interactive local shell   | Embedded web PTY and managed long-running processes                     |
-| Sessions and recovery                                           | Local project history and checkpoint continuation; web sessions | Session branching, selective rewind, export/share and cross-client sync |
-| Usage                                                           | Calls and provider-reported tokens                              | Reliable cost accounting and spend enforcement                          |
-| Real multi-file web coding                                      | Temporary isolated Node workspace                               | Persistent Git repositories and native local-project web bridge         |
-| LSP, MCP, plugins, skills, formatters                           | Can invoke installed tools through approved commands            | First-class native integrations                                         |
-| Git projects                                                    | Open existing directories; inspect diffs; approved Git commands | Managed worktrees, conflict UI and review/revert workflow               |
-| General work                                                    | Text files, approved commands and opt-in web search/page reading | Interactive browser automation and document extraction                 |
-| OpenCode compatibility                                          | Optional adapter documented below                               | Never required by native Council                                        |
+| Capability                                                      | Native Council today                                                          | Remaining work                                                          |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Model/API selection, mixed local/cloud, independent agent count | Native CLI/TUI and web                                                        | Provider discovery, OAuth and broader model-specific validation         |
+| Board, direct peer conversations, evidence/disputes, delegation | Same Council engine in native and web                                         | Real-model quality and scale evaluations                                |
+| Files, search, edits, patches, commands and tests               | Native project tools with approvals                                           | Richer navigation, semantic search and rollback                         |
+| Terminal UI                                                     | Own TUI, no OpenCode executable                                               | Mouse, richer layouts and command palette                               |
+| Editor                                                          | Own text editor with save/undo/redo; optional external editor                 | Inline syntax intelligence and advanced diffs                           |
+| Terminal                                                        | Approved commands and a handoff to an interactive local shell                 | Embedded web PTY and managed long-running processes                     |
+| Sessions and recovery                                           | Local project history and checkpoint continuation; web sessions               | Session branching, selective rewind, export/share and cross-client sync |
+| Usage                                                           | Calls and provider-reported tokens                                            | Reliable cost accounting and spend enforcement                          |
+| Real multi-file web coding                                      | Temporary isolated Node workspace                                             | Persistent Git repositories and native local-project web bridge         |
+| LSP and Skills                                                  | Native read-only stdio LSP and project Skills loading; [setup](LSP_SKILLS.md) | Hosted integrations, editor overlays and Skills activation UI           |
+| MCP, plugins, formatters                                        | Can invoke installed tools through approved commands                          | First-class integrations                                                |
+| Git projects                                                    | Open existing directories; inspect diffs; approved Git commands               | Managed worktrees, conflict UI and review/revert workflow               |
+| General work                                                    | Text files, approved commands and opt-in web search/page reading              | Interactive browser automation and document extraction                  |
+| OpenCode compatibility                                          | Optional adapter documented below                                             | Never required by native Council                                        |
 
 **Full OpenCode parity is unfinished.** This table tracks actual native features;
 OpenCode's own features are not counted as implemented Council features. The

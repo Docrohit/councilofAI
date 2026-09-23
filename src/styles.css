@@ -2542,6 +2542,66 @@ fieldset {
   gap: 0 15px;
   margin-top: 15px;
 }
+.benchmark-workspace {
+  min-width: 0;
+}
+.benchmark-problem,
+.benchmark-custom {
+  display: grid;
+  gap: 16px;
+  margin: 20px 0;
+}
+.benchmark-custom label,
+.benchmark-problem label {
+  display: grid;
+  gap: 8px;
+}
+.benchmark-custom textarea {
+  width: 100%;
+  resize: vertical;
+}
+.benchmark-answer {
+  border: 1px solid #405532;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+  min-width: 0;
+}
+.benchmark-answer summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.benchmark-answer h4 {
+  margin: 18px 0 10px;
+  color: #e1e5df;
+}
+.benchmark-answers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+}
+.benchmark-answers article {
+  min-width: 0;
+}
+.benchmark-workspace .markdown {
+  font-size: 16px;
+}
+.benchmark-workspace .field-help,
+.benchmark-report > p {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+  .benchmark-answers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .benchmark-answer {
+    padding: 12px;
+  }
+  .benchmark-report > header {
+    flex-wrap: wrap;
+  }
+}
 .benchmark-tasks .checkbox-label {
   font-size: 10px;
 }

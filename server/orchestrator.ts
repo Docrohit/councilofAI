@@ -176,6 +176,29 @@ const commandSchema = z
       .array(
         z.discriminatedUnion("name", [
           z.object({
+            name: z.literal("project_lsp"),
+            operation: z.enum([
+              "status",
+              "diagnostics",
+              "hover",
+              "definition",
+              "references",
+            ]),
+            path: z.string().min(1).max(200).optional(),
+            line: z.number().int().min(1).optional(),
+            character: z.number().int().min(1).optional(),
+          }),
+          z.object({
+            name: z.literal("project_skills"),
+            offset: z.number().int().min(0).optional(),
+          }),
+          z.object({
+            name: z.literal("project_skill"),
+            skill: z.string().min(1).max(64),
+            resource: z.string().max(200).optional(),
+            offset: z.number().int().min(0).optional(),
+          }),
+          z.object({
             name: z.literal("web_search"),
             query: z.string().min(1).max(600),
           }),
@@ -632,6 +655,9 @@ export class Orchestrator {
                 return JSON.stringify({ tool: action.name, ...result });
               }
               if (
+                action.name === "project_lsp" ||
+                action.name === "project_skills" ||
+                action.name === "project_skill" ||
                 action.name === "project_delete" ||
                 action.name === "project_move" ||
                 action.name === "project_diff" ||
@@ -642,12 +668,24 @@ export class Orchestrator {
                 action.name === "project_write" ||
                 action.name === "project_exec"
               ) {
+                if (
+                  ["project_lsp", "project_skills", "project_skill"].includes(
+                    action.name,
+                  ) &&
+                  !this.project
+                )
+                  throw new Error(
+                    "LSP and Skills tools require Council's native project runtime.",
+                  );
                 if (!config.sandbox && !this.project)
                   throw new Error(
                     "Hosted project tools are not enabled for this run.",
                   );
                 const request = {
                   ...action,
+                  ...(action.name === "project_skill"
+                    ? { name: action.skill }
+                    : {}),
                   action:
                     action.name.slice(8) === "exec"
                       ? "exec"
@@ -1172,7 +1210,9 @@ export class Orchestrator {
       };
       try {
         const projectInstructions = this.project
-          ? await this.project.instructions()
+          ? (await this.project.instructions()) +
+            "\n" +
+            ((await this.project.toolsContext?.()) || "")
           : "";
         const nativeProtocol = this.project
           ? protocol.replace(

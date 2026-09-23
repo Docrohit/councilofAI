@@ -502,9 +502,15 @@ also applies to discussion, board and direct-message content; it does not verify
 the mathematics or code. The project
 editor and command output are basic controls, not a full IDE/terminal emulator.
 
-The native TUI has Activity, Board, Conversations, Tools, Files, Answer and Help;
-model selection, typed slash commands, approvals, history/resume, and a basic
-save/undo/redo editor. It calls the same engine in-process.
+The native TUI has Discussion, Engagement, Board, Conversations, Findings,
+Answer, Tools, Files and Help. A boxed composer, slash-command menu and Ctrl+P
+palette provide keyboard navigation. Local connections have forms with masked
+API keys; `/models` selects the pool and `/sessions` searches project history
+without starting model calls. The live peer sidebar appears on wide terminals.
+Approvals preempt menus; bracketed paste remains draft text. The basic
+save/undo/redo editor remains available. It calls the same engine in-process;
+these local sessions/connections are separate from web accounts. See
+[NATIVE.md](NATIVE.md) for controls and limitations.
 
 | API family                                             | Purpose                                             |
 | ------------------------------------------------------ | --------------------------------------------------- |
@@ -534,7 +540,11 @@ request protection header and acceptable origin. Routes verify ownership.
 
 Credentials use AES-256-GCM with a stable hosted operator key or local `vault.key`.
 Provider responses omit secrets. Native metadata refers to environment variable
-names; current values are encrypted when synced into project storage.
+names; keys entered in the native form are encrypted in `native-keys.json`
+alongside its `vault.key` under the global config folder. Saved keys take
+precedence over environment values, and the effective key is encrypted again
+when synced into project storage. Endpoint/provider edits clear old stored keys
+and environment bindings. This is filesystem encryption, not an OS keychain.
 
 | Boundary                          | Control and limit                                                            |
 | --------------------------------- | ---------------------------------------------------------------------------- |

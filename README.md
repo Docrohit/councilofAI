@@ -41,6 +41,13 @@ Requires Node.js 22.18+. Use `/connect` and `/use` for mixed local/cloud models,
 running commands. See [native setup](docs/NATIVE.md) and [one-command upgrades](docs/UPGRADING.md).
 **Full OpenCode parity is still unfinished**; see the [capability table](docs/CODING.md#capability-status).
 
+Inside the TUI, type `/` or Ctrl+P for commands. `/connections` opens connection
+forms with masked key entry, `/models` selects the team’s models, `/agents` sets
+the peer count, and `/sessions` searches this project’s saved conversations.
+Tab switches the collaboration views; `/answer`, `/findings`, `/board` and
+`/conversations` jump directly. See [the native guide](docs/NATIVE.md) for a
+three-model/five-agent setup and terminal controls.
+
 ## Start the web app locally
 
 Requires **Node.js 22.18+** (Node 24 LTS recommended).

@@ -6,38 +6,38 @@ import {
   loadModels,
   saveModel,
   nativeDefaults,
+  nativeConfigDirectory,
+  removeModel,
+  type NativeModel,
 } from "./native.ts";
 import type { CouncilEvent, Run, RunConfig } from "../shared/types.ts";
 import type { ProjectPermission } from "../shared/project.ts";
+import { hasNativeKey, saveNativeKey } from "./credentials.ts";
+import { Dialog } from "./tui-dialog.ts";
+import {
+  commands,
+  livePeers,
+  viewNames,
+  sessionView,
+  fit,
+  wrapCells,
+} from "./tui-workspace.ts";
 export const cleanTerminal = (text: string) =>
   text
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
 export function wrapTerminal(text: string, width: number) {
-  const result: string[] = [];
-  for (const line of cleanTerminal(text).replace(/\t/g, "  ").split("\n")) {
-    const chars = Array.from(line);
-    if (!chars.length) result.push("");
-    for (let i = 0; i < chars.length; i += width)
-      result.push(chars.slice(i, i + width).join(""));
-  }
-  return result;
+  return wrapCells(cleanTerminal(text).replace(/\t/g, "  "), width);
 }
-const tabs = [
-  "Activity",
-  "Board",
-  "Conversations",
-  "Tools",
-  "Files",
-  "Answer",
-  "Help",
-];
+const tabs = viewNames;
 const help = `COUNCIL — standalone, no OpenCode installation or web login required.
 
 Enter a goal to let your agents work in this directory.
-/connect ID KIND MODEL [URL] [KEY_ENV]   Add a model; keys stay in environment variables
-/models                                Show your direct model connections
+/connections                           Add/edit connections; masked encrypted API keys
+/models                                Choose models with Space, then Enter
+/sessions                              Search saved sessions in this project
+/connect ID KIND MODEL [URL] [KEY_ENV]   Add a connection with environment-based keys
 /use ID1,ID2                            Select the team's models
 /agents 5                               Five agents, independent of model count
 /budget 40                              Maximum Council model calls
@@ -70,9 +70,12 @@ Enter a goal to let your agents work in this directory.
 Examples:
 /connect local ollama YOUR_INSTALLED_MODEL
 /connect cloud openai gpt-4o
-For cloud models, export OPENAI_API_KEY / ANTHROPIC_API_KEY / ZAI_API_KEY before launching Council.
-Use /models to check the exact environment variable and model ID.
+Use /connections to enter keys privately, or export the connection’s key environment variable.
+Keys entered here are encrypted in your local Council config folder, never in project files.
+These local connections and sessions are separate from your web account.
 
+Type / or Ctrl+P for the command menu. Enter sends; Ctrl+J adds a line.
+/discussion /engagement /board /conversations /findings /answer open team views.
 Tab / Shift+Tab switches views. PageUp/PageDown scrolls; End follows live output.
 Esc stops active work. Ctrl+C stops a run, or exits when idle.
 Writes and commands ask permission. Local shell commands have your OS access;
@@ -113,13 +116,21 @@ export async function startTui(options: TuiOptions) {
       "Council TUI needs an interactive terminal. Use council local-run for noninteractive work.",
     );
   let input = "",
-    tab = 6,
+    tab = 0,
     scroll = 0,
     busy = false,
     closing = false,
     suspended = false,
     status = "Ready",
     notice = "";
+  let dialog: Dialog | undefined;
+  let cursor = 0,
+    menuIndex = 0,
+    menuDismissed = false,
+    pasting = false,
+    pasteText = "";
+  let activeGoal = "";
+  let displayModels: NativeModel[] = [];
   let config: RunConfig | undefined, current: Run | undefined;
   const events: CouncilEvent[] = [];
   let filesContent = "",
@@ -168,6 +179,7 @@ export async function startTui(options: TuiOptions) {
           scroll = 0;
           draw();
         };
+        dialog = undefined; // Approval details always take priority over menus.
         permission = { request, resolve: answer };
         signal.addEventListener("abort", abort, { once: true });
         scroll = 0;
@@ -179,6 +191,7 @@ export async function startTui(options: TuiOptions) {
     count = config?.members.length ?? options.agents ?? 3,
   ) {
     const next = council.config(ids, count);
+    displayModels = loadModels();
     if (config) {
       const { members, providerIds } = next;
       config = { ...config, members, providerIds };
@@ -221,115 +234,166 @@ export async function startTui(options: TuiOptions) {
           )
           .join("\n")
       );
-    if (tab === 6) return help;
-    if (tab === 4)
+    if (tabs[tab] === "Help") return help;
+    if (tabs[tab] === "Files")
       return filesContent || "Use /files, /read path, /search text or /diff.";
-    if (tab === 5)
-      return (
-        current?.final ||
-        events.findLast((e) => e.type === "run.final")?.data.text ||
-        "The team has not produced a final answer yet."
-      );
-    if (tab === 1)
-      return (
-        events
-          .filter((e) => e.type === "board.post")
-          .map((e) => {
-            const p = e.data.post;
-            return `${(p.coauthors || [p.author]).map(name).join(" + ")}${p.threadId ? " · joint conclusion" : ""}\n${p.content}`;
-          })
-          .join("\n\n") || "Shared broadcasts will appear here."
-      );
-    if (tab === 2) {
-      const threads = new Map();
-      for (const e of events)
-        if (e.type === "conversation.updated")
-          threads.set(e.data.conversation.id, e.data.conversation);
-      return (
-        [...threads.values()]
-          .map(
-            (t) =>
-              `${t.participants.map(name).join(" ↔ ")} · ${t.topic}\n${t.messages.map((m: any) => `${name(m.author)}: ${m.content}`).join("\n")}\n${t.proposal ? `Conclusion r${t.proposal.revision}: ${t.proposal.summary}\n${t.participants.map((id: string) => `${name(id)}: ${t.proposal.reviews[id]?.agree === true ? "agrees" : t.proposal.reviews[id]?.agree === false ? "disagrees" : "awaiting review"}`).join(" · ")}${t.proposal.publishedPostId ? "\nPublished to board" : ""}` : ""}`,
-          )
-          .join("\n\n") || "Direct agent conversations will appear here."
-      );
-    }
-    if (tab === 3) {
-      const tools = new Map();
-      for (const e of events)
-        if (e.type === "coding.activity") tools.set(e.data.id, e.data);
-      return (
-        additionalTools +
-        "\n" +
-        events
-          .filter((e) => e.type === "tool.result" || e.type === "tool.error")
-          .map(
-            (e) =>
-              `${name(e.data.agentId)} · ${e.data.tool || "Tool error"}\n${e.data.message || e.data.result}`,
-          )
-          .join("\n\n") +
-        "\n" +
-        [...tools.values()]
-          .map(
-            (t) => `${name(t.agentId)} · ${t.title} · ${t.status}\n${t.detail}`,
-          )
-          .join("\n\n")
-      );
-    }
-    let text = "";
-    for (const e of events) {
-      const d = e.data;
-      if (e.type === "turn.start")
-        text += `\n\n${d.name} · ${d.model} · ${d.phase}\n`;
-      if (e.type === "turn.delta") text += d.text;
-      if (e.type === "agent.message")
-        text += `\n${d.name} → ${d.to === "all" ? "everyone" : name(d.to)}: ${d.content}\n`;
-      if (e.type === "agent.spawn") text += `\nNew peer ${d.name}: ${d.task}\n`;
-      if (e.type === "warning" || e.type === "turn.error")
-        text += `\n${d.message}\n`;
-      if (e.type === "run.status")
-        text += `\nSession ${d.status}${d.message ? ": " + d.message : ""}\n`;
-    }
-    return (
-      text ||
-      "Enter a goal. Every peer can discuss, delegate, investigate and propose an answer."
+    const content = sessionView(tabs[tab], events, current, name);
+    return tabs[tab] === "Tools" ? additionalTools + "\n" + content : content;
+  }
+  function suggestions() {
+    if (
+      menuDismissed ||
+      busy ||
+      dialog ||
+      editor ||
+      permission ||
+      !/^\/[^\s]*$/.test(input)
+    )
+      return [];
+    return commands.filter((c) =>
+      c.command.startsWith(input.slice(1).toLowerCase()),
     );
   }
   function draw() {
     if (suspended || closing) return;
     const width = Math.max(20, process.stdout.columns || 80),
-      height = Math.max(10, process.stdout.rows || 24),
-      area = height - 7;
-    const lines = wrapTerminal(body(), width - 2);
-    const bottom =
-      editor && !permission
+      height = Math.max(10, process.stdout.rows || 24);
+    const row = (text: string, w = width) =>
+      fit(cleanTerminal(text).replace(/\t/g, "  "), w);
+    const draft = input.slice(0, cursor) + "│" + input.slice(cursor);
+    const draftLines = wrapTerminal(draft || "│", width - 4);
+    const inputRows = Math.min(3, Math.max(1, draftLines.length));
+    const area = Math.max(1, height - 9 - inputRows);
+    const sidebar = width >= 115 && !editor && !permission && !dialog ? 30 : 0;
+    const mainWidth = width - (sidebar ? sidebar + 3 : 0);
+    const lines = wrapTerminal(
+      dialog && !permission ? dialog.lines(area) : body(),
+      mainWidth - 2,
+    );
+    const bottom = dialog
+      ? 0
+      : editor && !permission
         ? Math.max(
             0,
             Math.min(lines.length - area, editor.row - Math.floor(area / 2)),
           )
         : Math.max(0, lines.length - area - scroll);
     const visible = lines.slice(bottom, bottom + area);
-    const row = (text: string) =>
-      cleanTerminal(text).slice(0, width).padEnd(width);
+    const menu = suggestions();
+    if (menu.length) {
+      menuIndex = Math.min(menuIndex, menu.length - 1);
+      const start = Math.max(0, menuIndex - Math.min(4, area - 2));
+      const choices = menu.slice(
+        start,
+        start + Math.max(1, Math.min(7, area - 1)),
+      );
+      const menuLines = [
+        "Commands · ↑/↓ choose · Enter open · Esc dismiss",
+        ...choices.map(
+          (c, i) =>
+            `${start + i === menuIndex ? "›" : " "} /${c.command}  ${c.description}`,
+        ),
+      ];
+      while (visible.length < area) visible.push("");
+      visible.splice(
+        Math.max(0, area - menuLines.length),
+        menuLines.length,
+        ...menuLines,
+      );
+    }
+    const tokenCount = events
+      .filter((e) => e.type === "turn.done" || e.type === "research.done")
+      .reduce(
+        (n, e) => n + (e.data.inputTokens || 0) + (e.data.outputTokens || 0),
+        0,
+      );
+    const calls = events.filter(
+      (e) => e.type === "turn.start" || e.type === "research.start",
+    ).length;
+    const peers = livePeers(
+      current?.sharedState?.peers.map((p) => p.member) || config?.members || [],
+      events,
+    );
+    const side = [
+      "THE COUNCIL",
+      "",
+      ...peers.flatMap((p) => [
+        p.name + (p.unavailable ? " (unavailable)" : ""),
+        "  " +
+          (displayModels.find((m) => m.id === p.providerId)?.model ||
+            p.providerId),
+      ]),
+      "",
+      `${calls}/${config?.maxCalls || 24} calls`,
+      `${tokenCount.toLocaleString()} tokens reported`,
+      `Web research: ${config?.webResearch ? "on" : "off"}`,
+      "",
+      "/models · /agents",
+      "/sessions · /connections",
+    ];
+    // Keep the active view visible even when all labels will not fit.
+    let nav = tabs.map((t, i) => (i === tab ? `[${t}]` : t)).join("  ");
+    if (nav.length > width)
+      nav = `‹ Tab  [${tabs[tab]}]  ${tab + 1}/${tabs.length}  Shift+Tab ›`;
     const frame = [
-      row(` Council  |  ${council.directory}`),
+      row(` Council  |  ${current?.title || activeGoal || council.directory}`),
       row(
-        ` ${status} · ${config?.members.length || 0} agents · ${config?.providerIds.join(", ") || "no models"} · ${events.filter((e) => e.type === "turn.start" || e.type === "research.start").length}/${config?.maxCalls || 24} calls · ${events.filter((e) => e.type === "turn.done" || e.type === "research.done").reduce((sum, e) => sum + (e.data.inputTokens || 0) + (e.data.outputTokens || 0), 0)} tokens`,
+        ` ${status} · ${config?.members.length || 0} agents · ${config?.providerIds.join(", ") || "no models"} · ${calls}/${config?.maxCalls || 24} calls`,
       ),
-      row(tabs.map((t, i) => (i === tab ? `[${t}]` : t)).join("  ")),
+      row(nav),
       row("─".repeat(width)),
-      ...Array.from({ length: area }, (_, i) => row(visible[i] || "")),
-      row(notice),
-      row(
-        permission
-          ? " [y] Allow once  [a] Allow this kind for session  [n] Reject"
-          : editor
-            ? " Ctrl+S save · Ctrl+Z undo · Ctrl+Y redo · Esc close editor"
-            : busy
-              ? " Esc stop · Tab views · PageUp/PageDown scroll · End follow"
-              : " > " + input,
+      ...Array.from({ length: area }, (_, i) =>
+        sidebar
+          ? row(visible[i] || "", mainWidth) +
+            " │ " +
+            row(side[i] || "", sidebar)
+          : row(visible[i] || ""),
       ),
-      row(" Tab views · /help commands · Ctrl+C stop/quit"),
+      row(dialog?.error || notice),
+      row(
+        "┌─ " +
+          (busy ? "Working · Esc stop" : "Ask Council") +
+          " ─".repeat(Math.ceil(width / 2)),
+      ),
+      ...Array.from(
+        { length: inputRows },
+        (_, i) =>
+          row(
+            "│ " +
+              (permission
+                ? i
+                  ? ""
+                  : "[y] once · [a] session · [n] reject"
+                : editor
+                  ? i
+                    ? ""
+                    : "Ctrl+S save · Ctrl+Z undo · Esc close"
+                  : dialog
+                    ? i
+                      ? ""
+                      : "Complete the dialog above · Esc cancel"
+                    : busy
+                      ? i
+                        ? ""
+                        : "Tab views · Ctrl+P commands · PageUp/PageDown scroll"
+                      : input
+                        ? draftLines.slice(
+                            Math.max(
+                              0,
+                              wrapTerminal(input.slice(0, cursor), width - 4)
+                                .length - inputRows,
+                            ),
+                          )[i] || ""
+                        : i
+                          ? ""
+                          : "Ask anything… Type / for commands  │"),
+            width - 1,
+          ) + "│",
+      ),
+      row(
+        `└─ ${config?.members.length || 0} agents · ${config?.providerIds.join(" + ") || "/connections to add models"}`,
+      ),
+      row(" Enter send · Ctrl+J newline · Ctrl+P commands · Tab views · /quit"),
     ];
     process.stdout.write(
       "\x1b[H" + frame.slice(0, height).join("\r\n") + "\x1b[J",
@@ -350,9 +414,18 @@ export async function startTui(options: TuiOptions) {
   }
   async function run(goal: string, previous = current, resume = false) {
     if (!config) throw new Error("Configure a model first with /connect.");
+    const previousDisplay = {
+      current,
+      events: [...events],
+      activeGoal,
+      tab,
+      status,
+    };
     busy = true;
     notice = "";
     events.length = 0;
+    current = undefined;
+    activeGoal = goal;
     tab = 0;
     scroll = 0;
     status = "Starting";
@@ -360,6 +433,17 @@ export async function startTui(options: TuiOptions) {
     try {
       current = await council.run(goal, config, notify, previous, resume);
       status = current.status;
+    } catch (error) {
+      // Admission errors happen before the first event. Keep the selected
+      // conversation so a corrected retry remains a follow-up.
+      if (!events.length) {
+        current = previousDisplay.current;
+        events.push(...previousDisplay.events);
+        activeGoal = previousDisplay.activeGoal;
+        tab = previousDisplay.tab;
+        status = previousDisplay.status;
+      }
+      throw error;
     } finally {
       busy = false;
       draw();
@@ -369,7 +453,7 @@ export async function startTui(options: TuiOptions) {
     suspended = true;
     process.stdin.setRawMode(false);
     process.stdin.pause();
-    process.stdout.write("\x1b[?25h\x1b[?1049l");
+    process.stdout.write("\x1b[?2004l\x1b[?25h\x1b[?1049l");
     try {
       await new Promise<void>((resolve, reject) => {
         const child = spawn(command, args, {
@@ -382,10 +466,262 @@ export async function startTui(options: TuiOptions) {
     } finally {
       process.stdin.resume();
       process.stdin.setRawMode(true);
-      process.stdout.write("\x1b[?1049h\x1b[?25l");
+      process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?2004h");
       suspended = false;
       draw();
     }
+  }
+  function numberDialog(cmd: string, title: string, value: number) {
+    const fields = [
+      {
+        label: title,
+        value: String(value),
+        hint: "Applies to subsequent goals in this chat.",
+      },
+    ];
+    dialog = new Dialog(
+      title,
+      [],
+      async () => {
+        await command(`/${cmd} ${fields[0].value}`);
+        dialog = undefined;
+      },
+      fields,
+    );
+  }
+  function modelDialog() {
+    const models = loadModels();
+    if (!models.length) {
+      connectionDialog();
+      return;
+    }
+    const d = new Dialog(
+      "Models for this team",
+      models.map((m) => ({
+        id: m.id,
+        title: m.id,
+        detail: `${m.kind} · ${m.model}`,
+      })),
+      (ids) => {
+        if (!ids.length)
+          throw new Error("Select at least one model with Space.");
+        configure(ids);
+        dialog = undefined;
+        notice =
+          "Model pool updated. Models are shared across the selected agent count.";
+      },
+      undefined,
+      true,
+    );
+    d.selected = new Set(config?.providerIds || models.map((m) => m.id));
+    dialog = d;
+  }
+  function connectionDialog() {
+    dialog = new Dialog(
+      "Local connections · separate from your web account",
+      [
+        { id: "+", title: "Add connection" },
+        ...loadModels().map((m) => ({
+          id: m.id,
+          title: m.id,
+          detail: `${m.kind} · ${m.model}`,
+        })),
+      ],
+      ([id]) => {
+        if (!id) return;
+        if (id === "+") {
+          dialog = new Dialog(
+            "Choose provider",
+            Object.keys(nativeDefaults).map((id) => ({
+              id,
+              title: id,
+              detail:
+                id === "ollama"
+                  ? "Local model server"
+                  : id === "vllm"
+                    ? "RunPod or another vLLM server"
+                    : undefined,
+            })),
+            ([kind]) => {
+              if (kind) connectionForm(kind);
+            },
+          );
+        } else {
+          const m = loadModels().find((m) => m.id === id)!;
+          dialog = new Dialog(
+            `${m.id} · ${m.model}`,
+            [
+              { id: "edit", title: "Edit model, endpoint or API key" },
+              {
+                id: "clear",
+                title: "Remove saved API key",
+                detail: "Environment key, if configured, still applies",
+              },
+              { id: "delete", title: "Delete connection" },
+            ],
+            ([action]) => {
+              if (action === "edit") connectionForm(m.kind, m);
+              if (action === "clear") {
+                saveNativeKey(nativeConfigDirectory(), m.id, "");
+                notice = "Saved key removed.";
+                dialog = undefined;
+              }
+              if (action === "delete")
+                dialog = new Dialog(
+                  `Delete ${m.id}?`,
+                  [
+                    { id: "cancel", title: "Keep connection" },
+                    { id: "delete", title: "Delete connection and saved key" },
+                  ],
+                  ([answer]) => {
+                    if (answer === "delete") {
+                      removeModel(m.id);
+                      const ids =
+                        config?.providerIds.filter((id) => id !== m.id) || [];
+                      if (ids.length) configure(ids);
+                      else config = undefined;
+                      notice =
+                        "Connection removed. Existing session transcripts are retained.";
+                    }
+                    connectionDialog();
+                  },
+                );
+            },
+          );
+        }
+      },
+    );
+  }
+  function connectionForm(kind: string, existing?: NativeModel) {
+    const defaults = nativeDefaults[kind];
+    const fields = [
+      {
+        label: "Connection ID",
+        value: existing?.id || kind,
+        hint: existing
+          ? "Use the same ID when editing. Add a separate connection for a new ID."
+          : "A short name, e.g. gemma, codex or runpod.",
+      },
+      {
+        label: "Model ID",
+        value: existing?.model || (kind === "openai" ? "gpt-5.3-codex" : ""),
+        hint: "Exact served model ID. For Ollama use ollama list; for vLLM use /v1/models.",
+      },
+      {
+        label: "Base URL",
+        value: existing?.baseUrl || defaults.url,
+        hint: "For vLLM, include /v1. Endpoint changes clear saved keys AND environment bindings; re-enter a key below or rebind after saving.",
+      },
+      {
+        label: "Key environment variable (optional)",
+        value: existing?.keyEnv || defaults.keyEnv || "",
+        hint: "Alternative to a saved key. Leave blank for unauthenticated local servers.",
+      },
+      {
+        label: "API key (masked)",
+        value: "",
+        secret: true,
+        hint:
+          existing && hasNativeKey(nativeConfigDirectory(), existing.id)
+            ? "Blank keeps saved key only if the endpoint is unchanged. /connections can remove it."
+            : "Optional for Ollama. Encrypted locally when you press Enter; never written into the project.",
+      },
+    ];
+    dialog = new Dialog(
+      `Connection · ${kind}`,
+      [],
+      () => {
+        const [id, model, baseUrl, keyEnv, key] = fields.map((f) =>
+          f.value.trim(),
+        );
+        if (existing && existing.id !== id)
+          throw new Error(
+            "Keep this ID unchanged; use Add connection for a new ID.",
+          );
+        if (/[\r\n\x00]/.test(key)) throw new Error("Enter a single API key.");
+        saveModel({ id, kind, model, baseUrl, keyEnv: keyEnv || undefined });
+        if (key) saveNativeKey(nativeConfigDirectory(), id, key);
+        const ids = [...new Set([...(config?.providerIds || []), id])];
+        configure(ids);
+        fields[4].value = "";
+        dialog = undefined;
+        notice =
+          existing && (existing.baseUrl !== baseUrl || existing.kind !== kind)
+            ? `Saved ${id}. Old key/environment binding cleared; edit again to bind an environment key.`
+            : `Saved ${id}. /models selects the pool; /agents sets the team size.`;
+      },
+      fields,
+    );
+  }
+  function sessionsDialog() {
+    dialog = new Dialog(
+      "Saved sessions · this project only",
+      council.store.runs(council.userId).map((r) => ({
+        id: r.id,
+        title: r.title,
+        detail: `${r.status} · ${r.createdAt}`,
+      })),
+      async ([id]) => {
+        if (id) {
+          await command(`/session ${id}`);
+          dialog = undefined;
+        }
+      },
+    );
+  }
+  async function chooseCommand(value: string) {
+    const cmd = value.split(" ")[0];
+    const direct = [
+      "connections",
+      "models",
+      "agents",
+      "sessions",
+      "new",
+      "files",
+      "web",
+      "skills",
+      "lsp",
+      "budget",
+      "concurrency",
+      "resume",
+      "diff",
+      "permissions",
+      "quit",
+      ...tabs.map((t) => t.toLowerCase()),
+    ];
+    if (direct.includes(cmd)) {
+      try {
+        await command("/" + value);
+      } catch (e) {
+        notice = (e as Error).message;
+      }
+    } else {
+      input = "/" + value + " ";
+      cursor = input.length;
+      notice = "Add arguments, then Enter. /help shows usage.";
+    }
+    draw();
+  }
+  function palette() {
+    const available = busy
+      ? commands.filter((c) =>
+          tabs.some((t) => t.toLowerCase() === c.command && t !== "Files"),
+        )
+      : commands;
+    dialog = new Dialog(
+      busy ? "Views · team is working" : "Council commands",
+      available.map((c) => ({
+        id: c.command,
+        title: "/" + c.command,
+        detail: c.description,
+      })),
+      async ([value]) => {
+        if (value) {
+          dialog = undefined;
+          await chooseCommand(value);
+        }
+      },
+    );
   }
   async function command(value: string) {
     if (!value.startsWith("/")) {
@@ -398,9 +734,48 @@ export async function startTui(options: TuiOptions) {
       await quit();
       return;
     }
-    if (cmd === "help") {
-      tab = 6;
+    const view = tabs.findIndex(
+      (t) => t.toLowerCase() === cmd && t !== "Files",
+    );
+    if (view >= 0) {
+      tab = view;
       scroll = 0;
+      return;
+    }
+    if (cmd === "connections" || (cmd === "connect" && !arg)) {
+      connectionDialog();
+      return;
+    }
+    if (cmd === "sessions") {
+      sessionsDialog();
+      return;
+    }
+    if (cmd === "agents" && !arg) {
+      numberDialog(cmd, "Starting agents (1–32)", config?.members.length || 5);
+      return;
+    }
+    if ((cmd === "budget" || cmd === "concurrency") && !arg) {
+      numberDialog(
+        cmd,
+        cmd,
+        cmd === "budget" ? config?.maxCalls || 24 : config?.concurrency || 1,
+      );
+      return;
+    }
+    if (cmd === "web" && !arg) {
+      dialog = new Dialog(
+        "Web research",
+        [
+          { id: "off", title: "Off" },
+          { id: "on", title: "On", detail: "May incur OpenAI search fees" },
+        ],
+        async ([mode]) => {
+          if (mode) {
+            await command("/web " + mode);
+            dialog = undefined;
+          }
+        },
+      );
       return;
     }
     if (cmd === "connect") {
@@ -410,7 +785,7 @@ export async function startTui(options: TuiOptions) {
         throw new Error(
           "Use /connect ID KIND MODEL [URL] [KEY_ENV]. Kinds: openai, anthropic, glm, ollama, vllm, compatible.",
         );
-      saveModel({
+      const saved = saveModel({
         id,
         kind,
         model,
@@ -418,7 +793,7 @@ export async function startTui(options: TuiOptions) {
         keyEnv: keyEnv || defaults.keyEnv,
       });
       configure();
-      notice = `Saved ${id}. ${keyEnv || defaults.keyEnv ? `Key source: ${keyEnv || defaults.keyEnv}. Restart Council after exporting it.` : "No API key required by this configuration."}`;
+      notice = `Saved ${id}. ${saved.keyEnv ? `Key source: ${saved.keyEnv}. Restart Council after exporting it.` : "No API key required by this configuration."}`;
       return;
     }
     if (cmd === "skills" || cmd === "skill" || cmd === "lsp") {
@@ -470,7 +845,7 @@ export async function startTui(options: TuiOptions) {
           );
         }
         filesContent = JSON.stringify(result, null, 2);
-        tab = 4;
+        tab = 7;
         scroll = 0;
       } finally {
         busy = false;
@@ -480,15 +855,7 @@ export async function startTui(options: TuiOptions) {
       return;
     }
     if (cmd === "models") {
-      filesContent =
-        loadModels()
-          .map(
-            (m) =>
-              `${m.id} · ${m.kind} · ${m.model}\n${m.baseUrl}\nKey: ${m.keyEnv ? `${m.keyEnv} (${process.env[m.keyEnv] ? "set" : "not set"})` : "none"}`,
-          )
-          .join("\n\n") || "No models configured. Use /connect.";
-      tab = 4;
-      scroll = 0;
+      modelDialog();
       return;
     }
     if (cmd === "use") {
@@ -550,6 +917,7 @@ export async function startTui(options: TuiOptions) {
     }
     if (cmd === "new") {
       current = undefined;
+      activeGoal = "";
       events.length = 0;
       tab = 0;
       status = "Ready";
@@ -562,7 +930,7 @@ export async function startTui(options: TuiOptions) {
           .runs(council.userId)
           .map((r) => `${r.id} · ${r.status}\n${r.title}`)
           .join("\n\n") || "No saved sessions.";
-      tab = 4;
+      tab = 7;
       scroll = 0;
       return;
     }
@@ -591,7 +959,7 @@ export async function startTui(options: TuiOptions) {
       filesContent =
         (await council.project.files()).join("\n") ||
         "No text project files found.";
-      tab = 4;
+      tab = 7;
       scroll = 0;
       return;
     }
@@ -599,7 +967,7 @@ export async function startTui(options: TuiOptions) {
       const f = await council.project.read(arg);
       if (f.sha === null) throw new Error("File not found.");
       filesContent = `${arg}\n\n${f.content}`;
-      tab = 4;
+      tab = 7;
       scroll = 0;
       return;
     }
@@ -626,7 +994,7 @@ export async function startTui(options: TuiOptions) {
           manualController.signal,
         );
         filesContent = JSON.stringify(result, null, 2);
-        tab = 4;
+        tab = 7;
         notice = "File operation completed; recovery copy saved.";
       } finally {
         busy = false;
@@ -646,7 +1014,7 @@ export async function startTui(options: TuiOptions) {
         null,
         2,
       );
-      tab = 4;
+      tab = 7;
       scroll = 0;
       return;
     }
@@ -669,7 +1037,7 @@ export async function startTui(options: TuiOptions) {
         undo: [],
         redo: [],
       };
-      tab = 4;
+      tab = 7;
       scroll = 0;
       return;
     }
@@ -683,7 +1051,7 @@ export async function startTui(options: TuiOptions) {
     if (cmd === "shell") {
       busy = true;
       status = "Running command";
-      tab = 3;
+      tab = 6;
       draw();
       try {
         manualController = new AbortController();
@@ -705,6 +1073,8 @@ export async function startTui(options: TuiOptions) {
     if (busy) return;
     const value = input.trim();
     input = "";
+    cursor = 0;
+    menuDismissed = false;
     if (!value) return;
     notice = "";
     try {
@@ -731,7 +1101,7 @@ export async function startTui(options: TuiOptions) {
       process.off("SIGTERM", terminate);
       process.stdin.setRawMode(false);
       process.stdin.pause();
-      process.stdout.write("\x1b[?25h\x1b[?1049l");
+      process.stdout.write("\x1b[?2004l\x1b[?25h\x1b[?1049l");
       finish();
     }
   }
@@ -740,6 +1110,79 @@ export async function startTui(options: TuiOptions) {
   }
   function key(str: string, k: any = {}) {
     if (suspended || closing) return;
+    if (k.sequence === "\x1b[200~") {
+      pasting = true;
+      pasteText = "";
+      return;
+    }
+    if (k.sequence === "\x1b[201~") {
+      pasting = false;
+      const text = cleanTerminal(pasteText.replace(/\r/g, "\n"));
+      pasteText = "";
+      if (permission || busy || editor) {
+        notice =
+          "Paste ignored during work or in the editor. Use ordinary keys.";
+        draw();
+        return;
+      }
+      if (dialog) void dialog.key(text, {}, true).then(draw);
+      else {
+        input = (input.slice(0, cursor) + text + input.slice(cursor)).slice(
+          0,
+          20000,
+        );
+        cursor = Math.min(input.length, cursor + text.length);
+        menuDismissed = true;
+        draw();
+      }
+      return;
+    }
+    if (pasting) {
+      pasteText = (pasteText + (str || k.sequence || "")).slice(0, 20000);
+      return;
+    }
+    if (dialog && !permission) {
+      if (k.name === "escape" || (k.ctrl && k.name === "c")) {
+        dialog = undefined;
+        notice = "Dialog closed.";
+        draw();
+      } else void dialog.key(cleanTerminal(str || ""), k).then(draw);
+      return;
+    }
+    if (!permission && !editor && k.ctrl && k.name === "p") {
+      palette();
+      draw();
+      return;
+    }
+    const menu = suggestions();
+    if (menu.length && !permission && !editor) {
+      if (k.name === "escape") {
+        menuDismissed = true;
+        draw();
+        return;
+      }
+      if (k.name === "up" || k.name === "down") {
+        menuIndex =
+          (menuIndex + (k.name === "up" ? menu.length - 1 : 1)) % menu.length;
+        draw();
+        return;
+      }
+      if (k.name === "tab") {
+        input = "/" + menu[Math.min(menuIndex, menu.length - 1)].command;
+        cursor = input.length;
+        menuDismissed = true;
+        draw();
+        return;
+      }
+      if (k.name === "return") {
+        const c = menu[Math.min(menuIndex, menu.length - 1)];
+        input = "";
+        cursor = 0;
+        menuIndex = 0;
+        void chooseCommand(c.command);
+        return;
+      }
+    }
     if (k.ctrl && k.name === "c") {
       if (editor && !busy) {
         notice = "Close the editor with Esc before quitting.";
@@ -924,35 +1367,64 @@ export async function startTui(options: TuiOptions) {
       return;
     }
     if (busy) return;
+    if ((k.ctrl && k.name === "j") || k.name === "enter") {
+      input = input.slice(0, cursor) + "\n" + input.slice(cursor);
+      cursor++;
+      menuDismissed = true;
+      draw();
+      return;
+    }
     if (k.name === "return") {
       void submit();
       return;
     }
-    if (k.name === "backspace") {
-      input = Array.from(input).slice(0, -1).join("");
-      draw();
-      return;
-    }
-    if (k.ctrl && k.name === "u") {
+    if (k.name === "left")
+      cursor = Math.max(
+        0,
+        cursor - (Array.from(input.slice(0, cursor)).at(-1)?.length || 1),
+      );
+    else if (k.name === "right")
+      cursor = Math.min(
+        input.length,
+        cursor + (Array.from(input.slice(cursor))[0]?.length || 1),
+      );
+    else if ((k.ctrl && k.name === "a") || k.name === "home") cursor = 0;
+    else if (k.ctrl && k.name === "e") cursor = input.length;
+    else if (k.name === "backspace") {
+      const before = Array.from(input.slice(0, cursor)).slice(0, -1).join("");
+      input = before + input.slice(cursor);
+      cursor = before.length;
+    } else if (k.name === "delete")
+      input =
+        input.slice(0, cursor) +
+        Array.from(input.slice(cursor)).slice(1).join("");
+    else if (k.ctrl && k.name === "u") {
       input = "";
-      draw();
-      return;
+      cursor = 0;
+    } else if (!k.ctrl && !k.meta && str) {
+      const text = cleanTerminal(str);
+      input = (input.slice(0, cursor) + text + input.slice(cursor)).slice(
+        0,
+        20000,
+      );
+      cursor = Math.min(input.length, cursor + text.length);
     }
-    if (!k.ctrl && !k.meta && str && str !== "\n") {
-      input = (input + cleanTerminal(str)).slice(0, 20000);
-      draw();
-    }
+    menuDismissed = false;
+    menuIndex = 0;
+    draw();
   }
+
   emitKeypressEvents(process.stdin);
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on("keypress", key);
   process.stdout.on("resize", draw);
   process.on("SIGTERM", terminate);
-  process.stdout.write("\x1b[?1049h\x1b[?25l");
+  process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?2004h");
   draw();
   if (options.prompt) {
     input = options.prompt;
+    cursor = input.length;
     void submit();
   }
   await finished;

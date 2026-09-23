@@ -21,6 +21,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: python3 scripts/verify-tui.py
+      - run: python3 scripts/verify-tui-workspace.py
       - run: docker pull node:22-bookworm-slim && node scripts/verify-sandbox.mjs
       - run: node --import tsx scripts/verify-council-sandbox.mjs
       - run: npm run build

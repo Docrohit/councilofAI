@@ -27,6 +27,8 @@ export const cleanTerminal = (text: string) =>
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+export const terminalRow = (text: string, width: number) =>
+  fit(cleanTerminal(text).replace(/[\r\n\t]+/g, " "), width);
 export function wrapTerminal(text: string, width: number) {
   return wrapCells(cleanTerminal(text).replace(/\t/g, "  "), width);
 }
@@ -258,8 +260,7 @@ export async function startTui(options: TuiOptions) {
     if (suspended || closing) return;
     const width = Math.max(20, process.stdout.columns || 80),
       height = Math.max(10, process.stdout.rows || 24);
-    const row = (text: string, w = width) =>
-      fit(cleanTerminal(text).replace(/\t/g, "  "), w);
+    const row = (text: string, w = width) => terminalRow(text, w);
     const draft = input.slice(0, cursor) + "│" + input.slice(cursor);
     const draftLines = wrapTerminal(draft || "│", width - 4);
     const inputRows = Math.min(3, Math.max(1, draftLines.length));
@@ -613,25 +614,29 @@ export async function startTui(options: TuiOptions) {
         hint: "For vLLM, include /v1. Endpoint changes clear saved keys AND environment bindings; re-enter a key below or rebind after saving.",
       },
       {
-        label: "Key environment variable (optional)",
-        value: existing?.keyEnv || defaults.keyEnv || "",
-        hint: "Alternative to a saved key. Leave blank for unauthenticated local servers.",
-      },
-      {
-        label: "API key (masked)",
+        label: "API key (paste here; masked)",
         value: "",
         secret: true,
         hint:
           existing && hasNativeKey(nativeConfigDirectory(), existing.id)
-            ? "Blank keeps saved key only if the endpoint is unchanged. /connections can remove it."
-            : "Optional for Ollama. Encrypted locally when you press Enter; never written into the project.",
+            ? "Blank keeps the saved key if the endpoint is unchanged."
+            : "Paste the actual API key here. Optional for local servers without authentication.",
+      },
+      {
+        label: "Environment variable NAME (advanced)",
+        value: existing?.keyEnv || "",
+        hint: "Alternative to pasting a key: e.g. OPENAI_API_KEY. Leave blank when using the masked field above.",
+        validate: (value: string) =>
+          !value || /^[A-Z][A-Z0-9_]*$/.test(value)
+            ? undefined
+            : "Use a variable NAME such as OPENAI_API_KEY, or leave blank. Paste keys in the masked API key field above.",
       },
     ];
     dialog = new Dialog(
       `Connection · ${kind}`,
       [],
       () => {
-        const [id, model, baseUrl, keyEnv, key] = fields.map((f) =>
+        const [id, model, baseUrl, key, keyEnv] = fields.map((f) =>
           f.value.trim(),
         );
         if (existing && existing.id !== id)
@@ -639,11 +644,18 @@ export async function startTui(options: TuiOptions) {
             "Keep this ID unchanged; use Add connection for a new ID.",
           );
         if (/[\r\n\x00]/.test(key)) throw new Error("Enter a single API key.");
+        if (!id || !/^[a-zA-Z0-9_-]{1,60}$/.test(id))
+          throw new Error(
+            "Use a connection ID of 1–60 letters, numbers, underscores or hyphens.",
+          );
+        if (!model || model.length > 200)
+          throw new Error("Enter the exact model ID (1–200 characters).");
+        if (!baseUrl) throw new Error("Enter the model server's base URL.");
         saveModel({ id, kind, model, baseUrl, keyEnv: keyEnv || undefined });
         if (key) saveNativeKey(nativeConfigDirectory(), id, key);
         const ids = [...new Set([...(config?.providerIds || []), id])];
         configure(ids);
-        fields[4].value = "";
+        fields[3].value = "";
         dialog = undefined;
         notice =
           existing && (existing.baseUrl !== baseUrl || existing.kind !== kind)

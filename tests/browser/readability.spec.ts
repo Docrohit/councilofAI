@@ -14,6 +14,17 @@ The equation \(x^4 - 5x^2 + 4 = 0\) has **four real roots**. We can find them by
 x^4 - 5x^2 + 4 = (x^2 - 1)(x^2 - 4) = 0
 \]
 
+### Understanding RH
+
+- The non-trivial zeros of the zeta function \\( \zeta(s) \\) have real part \\( \frac{1}{2} \\).
+- Doubled commands also render: \\( \\zeta(s) = \\frac{1}{2} \\).
+
+\\[\begin{aligned}ab &= 1\\cd &= 2\end{aligned}\\]
+
+\\[ab = 1\\cd = 2\\]
+
+\\[\\begin{aligned}ab &= 1\\\\cd &= 2\\end{aligned}\\]
+
 ### Step by step
 
 1. Substitute $y = x^2$ to get a quadratic.
@@ -117,7 +128,15 @@ test("readable answers render equations and code without mobile overflow", async
   await expect(
     panel.getByRole("heading", { name: "Solving the equation" }),
   ).toBeVisible();
-  await expect(panel.locator(".katex-display")).toHaveCount(2);
+  await expect(panel.locator(".katex-display")).toHaveCount(5);
+  await expect(panel.locator(".katex-error")).toHaveCount(0);
+  const rh = panel.locator("li").filter({ hasText: "non-trivial zeros" });
+  await expect(rh.locator(".katex")).toHaveCount(2);
+  await expect(rh.locator(".katex-error")).toHaveCount(0);
+  await expect(rh.locator(".katex-mathml mfrac")).toHaveCount(1);
+  const escaped = panel.locator("li").filter({ hasText: "Doubled commands" });
+  await expect(escaped.locator(".katex")).toHaveCount(1);
+  await expect(escaped.locator(".katex-error")).toHaveCount(0);
   await expect(panel.locator(".katex-mathml math").first()).toBeAttached();
   await expect(panel.locator(".hljs-keyword").first()).toHaveText("const");
   await expect(panel.locator("ol > li")).toHaveCount(3);

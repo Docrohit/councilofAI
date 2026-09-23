@@ -72,10 +72,19 @@ try:
     send('\r')
     wait_for('Choose provider')
     send('openai\r')
-    wait_for('API key (masked)')
-    # fields: ID, model, base URL, key env, API key. Secret is pasted literally.
-    send('\x15codex\t\t\t\t')
-    wait_for('API key (masked)')
+    wait_for('API key (paste here; masked)')
+    # Invalid input produces one readable error without growing the screen.
+    send('\t\x15\r');wait_for('Enter the exact model ID')
+    assert b'"invalid_format"' not in seen and b'"issues"' not in seen
+    frame=seen.split(b'\x1b[H')[-1].split(b'\x1b[J')[0]
+    assert frame.count(b'\n') < 36
+    send('gpt-5.3-codex\x1b[Z')
+    # fields: ID, model, base URL, API key, optional environment name. Secret is pasted literally.
+    send('\x15codex\t\t\t')
+    wait_for('API key (paste here; masked)')
+    send('\t\x1b[200~sk-proj-mistaken-fixture-value\x1b[201~');wait_for('Use a variable NAME')
+    assert b'sk-proj-mistaken-fixture-value' not in transcript
+    send('\x1b[Z')
     send('\x1b[200~fixture-super-private-key\x1b[201~')
     wait_for('••••')
     send('\r')

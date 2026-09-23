@@ -1,4 +1,5 @@
 import test from "node:test";
+import { lines } from "../server/providers.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -221,4 +222,55 @@ test("canonical contributions replace protocol blocks and live peers reflect fai
   const peers = livePeers([peer], events);
   assert.equal(peers[0].providerId, "cloud");
   assert.equal(peers[1].unavailable, true);
+});
+
+test("returning a provider stream cannot hang on transport cancellation", async () => {
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("fixture\n"));
+    },
+    cancel() {
+      cancelled = true;
+      return new Promise<void>(() => {});
+    },
+  });
+  const iterator = lines(stream);
+  assert.equal((await iterator.next()).value, "fixture");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      iterator.return(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Stream return hung")), 1000);
+      }),
+    ]);
+    assert.equal(cancelled, true);
+    assert.equal(stream.locked, false);
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+test("aborting a provider stream resumes a pending read and stops buffered yields", async () => {
+  for (const waiting of [true, false]) {
+    let cancelled = false;
+    const controller = new AbortController();
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        if (!waiting) c.enqueue(new TextEncoder().encode("first\nsecond\n"));
+      },
+      cancel() {
+        cancelled = true;
+        return new Promise<void>(() => {});
+      },
+    });
+    const iterator = lines(stream, controller.signal);
+    if (!waiting) assert.equal((await iterator.next()).value, "first");
+    const pending = waiting ? iterator.next() : undefined;
+    controller.abort(new Error("Fixture stopped"));
+    await assert.rejects(pending || iterator.next(), /Fixture stopped/);
+    assert.equal(cancelled, true);
+    assert.equal(stream.locked, false);
+  }
 });

@@ -1,19 +1,30 @@
 import type { ChatMessage, Chunk, Provider } from "../shared/types.ts";
 import { validateEndpoint } from "./security.ts";
 
-export async function* lines(body: ReadableStream<Uint8Array>) {
+export async function* lines(
+  body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
+) {
+  signal?.throwIfAborted();
   const reader = body.getReader();
+  const abort = () => {
+    void reader.cancel(signal?.reason).catch(() => {});
+  };
+  signal?.addEventListener("abort", abort, { once: true });
   const decoder = new TextDecoder();
   let buffer = "";
   try {
     while (true) {
+      signal?.throwIfAborted();
       const { value, done } = await reader.read();
+      signal?.throwIfAborted();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       if (buffer.length > 2_000_000)
         throw new Error("Provider stream frame exceeded limit.");
       let index: number;
       while ((index = buffer.indexOf("\n")) !== -1) {
+        signal?.throwIfAborted();
         yield buffer.slice(0, index).replace(/\r$/, "");
         buffer = buffer.slice(index + 1);
       }
@@ -21,16 +32,20 @@ export async function* lines(body: ReadableStream<Uint8Array>) {
     buffer += decoder.decode();
     if (buffer.trim()) yield buffer;
   } finally {
-    await reader.cancel().catch(() => {});
+    signal?.removeEventListener("abort", abort);
+    // A transport can leave cancellation pending (notably while a model turn
+    // is paused for approval). Start cleanup without blocking iterator return.
+    void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
 export async function* streamJson(
   body: ReadableStream<Uint8Array>,
   ndjson = false,
+  signal?: AbortSignal,
 ): AsyncGenerator<any> {
   let data: string[] = [];
-  for await (const line of lines(body)) {
+  for await (const line of lines(body, signal)) {
     if (ndjson) {
       if (line.trim()) yield JSON.parse(line);
       continue;
@@ -109,7 +124,9 @@ async function errorPayload(response: Response) {
   } catch {
     return undefined;
   } finally {
-    await reader.cancel().catch(() => {});
+    // A transport can leave cancellation pending (notably while a model turn
+    // is paused for approval). Start cleanup without blocking iterator return.
+    void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
@@ -199,6 +216,7 @@ export async function* complete(
   for await (const part of streamJson(
     response.body,
     provider.kind === "ollama",
+    request.signal,
   )) {
     if (part.error || part.type === "error" || part.type === "response.failed")
       throw providerError(provider, part);

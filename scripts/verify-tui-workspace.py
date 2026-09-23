@@ -107,7 +107,7 @@ try:
     assert 'Previous answer:\nRoots are -2' in json.dumps(requests).replace('\\n','\n')
     assert b'Council commands' not in seen
     send('\x03');wait_for('Stopping')
-    time.sleep(0.4)
+    wait_for('cancelled')
     send('/new\r');wait_for('New conversation')
     # Small terminal: active view remains discoverable and composer remains present.
     fcntl.ioctl(master,termios.TIOCSWINSZ,struct.pack('HHHH',18,42,0,0));os.kill(process.pid,signal.SIGWINCH)

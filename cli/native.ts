@@ -38,6 +38,54 @@ const modelSchema = z.object({
     .optional(),
 });
 export type NativeModel = z.infer<typeof modelSchema>;
+
+const teamProfileSchema = z.object({
+  maxOutputTokens: z.number().int().min(256).max(16384).optional(),
+  agents: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(60),
+        role: z.string().trim().min(1).max(200).optional(),
+        systemPrompt: z.string().trim().min(1).max(4000).optional(),
+        maxOutputTokens: z.number().int().min(256).max(16384).optional(),
+      }),
+    )
+    .max(32)
+    .optional(),
+});
+
+/**
+ * Apply a team profile file to a run config: a global output-token cap plus
+ * per-agent overrides matched case-insensitively by agent name. Agents listed
+ * in the profile but not currently on the team are ignored, so one profile
+ * can cover several team sizes.
+ */
+export function applyTeamProfile(config: RunConfig, file: string): RunConfig {
+  let profile: z.infer<typeof teamProfileSchema>;
+  try {
+    profile = teamProfileSchema.parse(JSON.parse(readFileSync(file, "utf8")));
+  } catch (error) {
+    const message =
+      error instanceof z.ZodError
+        ? error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+        : (error as Error).message;
+    throw new Error(`Team profile rejected (${file}): ${message}`);
+  }
+  if (profile.maxOutputTokens !== undefined)
+    config.maxOutputTokens = profile.maxOutputTokens;
+  for (const agent of profile.agents ?? []) {
+    const member = config.members.find(
+      (m) => m.name.toLowerCase() === agent.name.toLowerCase(),
+    );
+    if (!member) continue;
+    if (agent.role !== undefined) member.role = agent.role;
+    if (agent.systemPrompt !== undefined) member.systemPrompt = agent.systemPrompt;
+    if (agent.maxOutputTokens !== undefined)
+      member.maxOutputTokens = agent.maxOutputTokens;
+  }
+  return config;
+}
+
 export const nativeConfigDirectory = () =>
   process.env.COUNCIL_CONFIG_DIR || path.join(homedir(), ".config", "council");
 export function loadModels(): NativeModel[] {
@@ -115,6 +163,8 @@ export class NativeCouncil {
   readonly db: ReturnType<typeof openDb>;
   readonly store: Store;
   readonly engine: Orchestrator;
+  /** Team profile applied to every config built by config(); set via --team or /team. */
+  teamFile?: string;
   private lockFile: string;
   constructor(
     directory: string,
@@ -227,7 +277,7 @@ export class NativeCouncil {
       );
     if (!Number.isInteger(count) || count < 1 || count > 32)
       throw new Error("Choose 1–32 starting agents.");
-    return {
+    const config: RunConfig = {
       providerIds: selected,
       members: Array.from({ length: count }, (_, i) => ({
         id: `peer-${i + 1}`,
@@ -240,8 +290,10 @@ export class NativeCouncil {
       concurrency: 1,
       maxCalls: Math.max(24, count * 3 + 1),
       maxMinutes: 20,
-      maxOutputTokens: 4096,
+      maxOutputTokens: 8192,
     };
+    if (this.teamFile) applyTeamProfile(config, this.teamFile);
+    return config;
   }
   async run(
     prompt: string,
@@ -280,6 +332,16 @@ export class NativeCouncil {
       throw new Error(
         "Every peer needs a distinct identity and a selected model.",
       );
+    if (
+      config.members.some(
+        (m) =>
+          m.maxOutputTokens !== undefined &&
+          (!Number.isInteger(m.maxOutputTokens) ||
+            m.maxOutputTokens < 256 ||
+            m.maxOutputTokens > 16384),
+      )
+    )
+      throw new Error("Invalid agent output tokens: choose 256–16384 per agent.");
     config = structuredClone(config);
     if (!prompt.trim() || prompt.length > 20000)
       throw new Error("Enter a goal of 1–20000 characters.");

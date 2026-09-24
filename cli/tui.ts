@@ -8,6 +8,7 @@ import {
   nativeDefaults,
   nativeConfigDirectory,
   removeModel,
+  applyTeamProfile,
   type NativeModel,
 } from "./native.ts";
 import type { CouncilEvent, Run, RunConfig } from "../shared/types.ts";
@@ -51,6 +52,8 @@ Enter a goal to let your agents work in this directory.
 /lsp hover|definition|references PATH LINE COLUMN  Inspect a symbol (one-based)
 /concurrency 1                          Concurrent agents (start with one for coding)
 /limits 12 3                            Total agents and spawn depth; unlimited allowed
+/tokens 16384                           Output token limit per model call (256–16384)
+/team team.json                         Load per-agent roles, instructions and token caps
 /files                                  Browse the project file list
 /read docs/design.md                    View a text file
 /search timeout                         Find literal text across project files
@@ -96,6 +99,8 @@ export interface TuiOptions {
   concurrency?: number;
   maxAgents?: number | null;
   maxDepth?: number | null;
+  maxOutputTokens?: number;
+  team?: string;
   prompt?: string;
 }
 export async function startTui(options: TuiOptions) {
@@ -106,6 +111,13 @@ export async function startTui(options: TuiOptions) {
       options.maxCalls > 256)
   )
     throw new Error("Choose a call budget of 4–256.");
+  if (
+    options.maxOutputTokens !== undefined &&
+    (!Number.isInteger(options.maxOutputTokens) ||
+      options.maxOutputTokens < 256 ||
+      options.maxOutputTokens > 16384)
+  )
+    throw new Error("Choose an output token limit of 256–16384.");
   if (
     options.concurrency !== undefined &&
     (!Number.isInteger(options.concurrency) ||
@@ -188,6 +200,7 @@ export async function startTui(options: TuiOptions) {
         draw();
       }),
   );
+  if (options.team) council.teamFile = options.team;
   function configure(
     ids?: string[],
     count = config?.members.length ?? options.agents ?? 3,
@@ -208,6 +221,8 @@ export async function startTui(options: TuiOptions) {
         config.concurrency = options.concurrency;
       if (options.maxAgents !== undefined) config.maxAgents = options.maxAgents;
       if (options.maxDepth !== undefined) config.maxDepth = options.maxDepth;
+      if (options.maxOutputTokens !== undefined)
+        config.maxOutputTokens = options.maxOutputTokens;
     }
   }
   try {
@@ -920,6 +935,23 @@ export async function startTui(options: TuiOptions) {
       config.maxAgents = agents;
       config.maxDepth = depth;
       notice = `Delegation: ${agents ?? "unlimited"} agents, depth ${depth ?? "unlimited"}. Call and time budgets still apply.`;
+      return;
+    }
+    if (cmd === "tokens") {
+      if (!config) throw new Error("Configure a model first.");
+      const n = Number(arg);
+      if (!Number.isInteger(n) || n < 256 || n > 16384)
+        throw new Error("Use /tokens N: output token limit of 256–16384.");
+      config.maxOutputTokens = n;
+      notice = `Output token limit: ${n} per call.`;
+      return;
+    }
+    if (cmd === "team") {
+      if (!config) throw new Error("Configure a model first.");
+      if (!arg) throw new Error("Use /team FILE to load a team profile JSON.");
+      applyTeamProfile(config, arg); // validates before teamFile is remembered
+      council.teamFile = arg;
+      notice = `Team profile applied from ${arg}. Output limit ${config.maxOutputTokens} per call.`;
       return;
     }
     if (cmd === "permissions") {

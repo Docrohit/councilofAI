@@ -28,6 +28,8 @@ const { values, positionals } = parseArgs({
     "max-agents": { type: "string" },
     "max-depth": { type: "string" },
     "max-calls": { type: "string" },
+    "max-output-tokens": { type: "string" },
+    team: { type: "string" },
     version: { type: "boolean" },
     check: { type: "boolean" },
     name: { type: "string" },
@@ -325,7 +327,7 @@ async function main() {
   }
   if (values.help) {
     console.log(
-      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n  upgrade [--check] [--web]          Update a clean main installation; --web builds the web UI\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--web]                      Enable public web research (search fees may apply)\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
+      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n      [--max-output-tokens N] [--team FILE]\n  upgrade [--check] [--web]          Update a clean main installation; --web builds the web UI\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--web]                      Enable public web research (search fees may apply)\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-output-tokens N]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
     );
     return;
   }
@@ -360,6 +362,10 @@ async function main() {
           : values["max-depth"]
             ? Number(values["max-depth"])
             : undefined,
+      maxOutputTokens: values["max-output-tokens"]
+        ? Number(values["max-output-tokens"])
+        : undefined,
+      team: values.team || undefined,
       prompt: positionals.slice(1).join(" ") || undefined,
     });
     return;
@@ -409,11 +415,14 @@ async function main() {
     process.on("SIGINT", cancel);
     process.on("SIGTERM", cancel);
     try {
+      council.teamFile = values.team || undefined;
       const config = council.config(
         values.providers?.split(","),
         Number(values.agents || 3),
       );
       if (values["max-calls"]) config.maxCalls = Number(values["max-calls"]);
+      if (values["max-output-tokens"])
+        config.maxOutputTokens = Number(values["max-output-tokens"]);
       config.webResearch = !!values.web;
       if (values.concurrency) config.concurrency = Number(values.concurrency);
       if (values["max-agents"])
@@ -539,6 +548,15 @@ async function main() {
     const count = Number(values.agents || ids.length);
     if (!Number.isInteger(count) || count < 1 || count > 32)
       throw new Error("Choose 1–32 starting agents.");
+    const maxOutputTokens = values["max-output-tokens"]
+      ? Number(values["max-output-tokens"])
+      : 8192;
+    if (
+      !Number.isInteger(maxOutputTokens) ||
+      maxOutputTokens < 256 ||
+      maxOutputTokens > 16384
+    )
+      throw new Error("Choose --max-output-tokens between 256 and 16384.");
     const config: RunConfig = {
       webResearch: !!values.web,
       providerIds: ids,
@@ -559,10 +577,14 @@ async function main() {
           ? null
           : Number(values["max-depth"] || 3),
       maxCalls: Number(values["max-calls"] || Math.max(24, count * 3 + 1)),
-      maxOutputTokens: 4096,
+      maxOutputTokens,
       concurrency: Number(values.concurrency || 1),
       maxMinutes: 20,
     };
+    if (values.team) {
+      const { applyTeamProfile } = await import("./native.ts");
+      applyTeamProfile(config, values.team);
+    }
     const run = await api("/runs", "POST", { prompt, config });
     console.log(`Session: ${run.id}\nWeb: ${base}`);
     await watch(run.id);

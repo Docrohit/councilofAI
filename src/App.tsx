@@ -75,7 +75,7 @@ const defaults = (providers: Provider[]): RunConfig => ({
   maxAgents: 12,
   maxDepth: 3,
   maxCalls: 24,
-  maxOutputTokens: 4096,
+  maxOutputTokens: 8192,
   maxMinutes: 20,
 });
 const busy = (run?: Run | null) =>

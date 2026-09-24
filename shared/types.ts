@@ -26,6 +26,10 @@ export interface Member {
   parentId?: string;
   depth?: number;
   reportsTo?: string;
+  /** Per-agent output token cap; falls back to the run's maxOutputTokens. */
+  maxOutputTokens?: number;
+  /** Extra per-agent instructions appended to the agent's system prompt. */
+  systemPrompt?: string;
 }
 export interface RunConfig {
   webResearch?: boolean;

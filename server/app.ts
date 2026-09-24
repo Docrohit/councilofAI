@@ -67,6 +67,8 @@ const member = z.object({
   name: z.string().trim().min(1).max(60),
   role: z.string().trim().min(1).max(200),
   providerId: z.string().min(1).max(80),
+  systemPrompt: z.string().trim().min(1).max(4000).optional(),
+  maxOutputTokens: z.number().int().min(256).max(16384).optional(),
 });
 const configSchema = z.object({
   sandbox: z.boolean().default(false),
@@ -77,7 +79,7 @@ const configSchema = z.object({
   maxDepth: z.number().int().min(0).max(16).nullable().default(3),
   concurrency: z.number().int().min(1).max(8).default(1),
   maxCalls: z.number().int().min(4).max(256).default(24),
-  maxOutputTokens: z.number().int().min(256).max(16384).default(4096),
+  maxOutputTokens: z.number().int().min(256).max(16384).default(8192),
   maxMinutes: z.number().int().min(1).max(120).default(20),
 });
 const fileSchema = z.object({

@@ -115,6 +115,43 @@ Model selection and agent-count changes apply to subsequent goals. Resuming
 restores that session's team configuration. Model connections and session data
 persist; terminal team settings should be supplied again on a fresh launch.
 
+## Team profiles and per-agent output limits
+
+Reasoning models spend output tokens on thinking before the visible reply, so
+runs now default to an 8192-token output limit per model call. Raise or lower
+it with `/tokens N` (256–16384) in the terminal UI, or start with
+`council --max-output-tokens N`. Higher limits give deep-reasoning agents room
+to finish; they do not make replies longer by themselves.
+
+A team profile JSON customizes named agents when you form a team. Start with
+`council --team team.json` or load it at runtime with `/team team.json`:
+
+```json
+{
+  "maxOutputTokens": 16384,
+  "agents": [
+    {
+      "name": "Atlas",
+      "role": "Deep reasoner",
+      "systemPrompt": "Explore the problem thoroughly before answering.",
+      "maxOutputTokens": 16384
+    },
+    { "name": "Sage", "role": "Skeptic and verifier" },
+    { "name": "echo", "systemPrompt": "Focus on concrete counterexamples." }
+  ]
+}
+```
+
+`maxOutputTokens` at the top sets the run-wide limit. Each `agents` entry is
+matched case-insensitively by agent name (`Atlas`, `Sage`, `Echo`, `Peer 4`,
+…) and may set a `role`, extra `systemPrompt` instructions and its own
+`maxOutputTokens` cap. Agents listed in the profile but not on the current
+team are ignored, so one profile can cover several team sizes; per-agent caps
+must stay within 256–16384. Per-agent customizations are reapplied when you
+change the team size or model selection; `/tokens` changes the run-wide cap.
+The profile persists across `/resume` in the same terminal session. Delegates
+spawned during a run use the run-wide limit.
+
 ## Example: Ollama + OpenAI + RunPod, five agents
 
 Start `council --agents 5` from the project you want to work on. Use `/connections`

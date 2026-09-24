@@ -1,6 +1,6 @@
 {
   "name": "council-harness",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "type": "module",
   "description": "A personal multi-model agent council with a web workspace and developer CLI",
@@ -27,6 +27,8 @@
     "ipaddr.js": "^2.5.0",
     "katex": "^0.16.47",
     "lucide-react": "^0.577.0",
+    "mammoth": "^1.12.3",
+    "pdf-parse": "^2.4.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
@@ -37,6 +39,7 @@
     "tsx": "^4.21.0",
     "vscode-jsonrpc": "^9.0.2",
     "yaml": "^2.9.1",
+    "yauzl": "^3.4.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -46,6 +49,7 @@
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-react": "^5.1.4",
     "prettier": "^3.9.8",
     "typescript": "^5.9.3",

@@ -1253,3 +1253,226 @@ test("web research shares cached sources across peers, counts search calls and r
     await new Promise<void>((r) => model.close(() => r()));
   }
 });
+
+test("chat attachments enforce ownership, limits, persistence and follow-up inheritance", async () =>
+  harness(async ({ api, base, db, store, engine }: any) => {
+    const alice = await api("/auth/signup", {
+      email: "files-a@example.test",
+      password: "long-password-123",
+    });
+    const bob = await api("/auth/signup", {
+      email: "files-b@example.test",
+      password: "long-password-123",
+    });
+    const upload = async (cookie: string, name: string, content: string) => {
+      const r = await fetch(base + "/api/attachments", {
+        method: "POST",
+        headers: {
+          cookie,
+          "x-council-request": "1",
+          "x-file-name": encodeURIComponent(name),
+          "content-type": "application/octet-stream",
+        },
+        body: content,
+      });
+      return { status: r.status, data: await r.json() };
+    };
+    assert.equal(
+      (await upload("", "notes.md", "private evidence")).status,
+      401,
+    );
+    assert.equal((await upload(alice.cookie, "payload.exe", "x")).status, 400);
+    const item = await upload(
+      alice.cookie,
+      "evidence.md",
+      "# Private attachment marker",
+    );
+    assert.equal(item.status, 201);
+    const provider = (await api("/providers", undefined, alice.cookie)).data[0]
+      .id;
+    const config = cfg([provider], 1);
+    const bobProvider = (await api("/providers", undefined, bob.cookie)).data[0]
+      .id;
+    assert.equal(
+      (
+        await api(
+          "/runs",
+          {
+            prompt: "Read",
+            config: cfg([bobProvider], 1),
+            attachmentIds: [item.data.id],
+          },
+          bob.cookie,
+        )
+      ).status,
+      400,
+    );
+    await api("/attachments/" + item.data.id, undefined, bob.cookie, "DELETE");
+    const created = await api(
+      "/runs",
+      {
+        prompt: "Read attached evidence",
+        config,
+        attachmentIds: [item.data.id],
+      },
+      alice.cookie,
+    );
+    assert.equal(created.status, 201);
+    assert.match(created.data.attachments[0].text, /Private attachment marker/);
+    assert.equal(
+      db
+        .prepare("SELECT count(*) n FROM attachments WHERE id=?")
+        .get(item.data.id).n,
+      0,
+    );
+    await done(api, alice.cookie, created.data.id);
+    const follow = await api(
+      "/runs",
+      {
+        prompt: "Explain the same document",
+        config,
+        parentId: created.data.id,
+      },
+      alice.cookie,
+    );
+    assert.equal(follow.status, 201);
+    assert.equal(follow.data.attachments[0].id, item.data.id);
+    await done(api, alice.cookie, follow.data.id);
+    assert.equal(
+      (await api("/runs/" + created.data.id, undefined, bob.cookie)).status,
+      404,
+    );
+    assert.equal(
+      (await api("/runs/" + created.data.id, undefined, alice.cookie)).data.run
+        .attachments[0].text,
+      item.data.text,
+    );
+    const expired = await upload(
+      alice.cookie,
+      "expired.md",
+      "Expired evidence",
+    );
+    db.prepare("UPDATE attachments SET expires=0 WHERE id=?").run(
+      expired.data.id,
+    );
+    assert.equal(
+      (
+        await api(
+          "/runs",
+          { prompt: "Read", config, attachmentIds: [expired.data.id] },
+          alice.cookie,
+        )
+      ).status,
+      400,
+    );
+    const removed = await upload(alice.cookie, "remove.md", "Delete this");
+    await api(
+      "/attachments/" + removed.data.id,
+      undefined,
+      alice.cookie,
+      "DELETE",
+    );
+    assert.equal(
+      db
+        .prepare("SELECT count(*) n FROM attachments WHERE id=?")
+        .get(removed.data.id).n,
+      0,
+    );
+  }));
+
+test("every peer receives attachment text through the shared provider request", async () =>
+  harness(async ({ api, base, engine }: any) => {
+    const auth = await api("/auth/signup", {
+      email: "files-model@example.test",
+      password: "long-password-123",
+    });
+    const p = await api(
+      "/providers",
+      {
+        name: "Fixture bridge",
+        kind: "vllm",
+        baseUrl: "http://127.0.0.1:8000/v1",
+        model: "fixture",
+        transport: "bridge",
+      },
+      auth.cookie,
+    );
+    const requests: any[] = [];
+    engine.bridge.complete = async function* (
+      _uid: any,
+      _provider: any,
+      request: any,
+    ) {
+      requests.push(request);
+      yield {
+        text: 'Fixture answer.\n```council\n{"proposal":{"answer":"The attachment says 42.","rationale":"Attachment fixture"}}\n```',
+      };
+    };
+    const response = await fetch(base + "/api/attachments", {
+      method: "POST",
+      headers: {
+        cookie: auth.cookie,
+        "x-council-request": "1",
+        "x-file-name": "evidence.md",
+        "content-type": "application/octet-stream",
+      },
+      body: "Attachment marker: 42",
+    });
+    const file = await response.json();
+    assert.equal(response.status, 201);
+    const run = await api(
+      "/runs",
+      {
+        prompt: "Read the evidence",
+        config: cfg([p.data.id], 3, { maxCalls: 6 }),
+        attachmentIds: [file.id],
+      },
+      auth.cookie,
+    );
+    assert.equal(run.status, 201);
+    await done(api, auth.cookie, run.data.id);
+    assert.ok(requests.length >= 3);
+    for (const request of requests) {
+      assert.match(request.messages[1].content, /Attachment marker: 42/);
+      assert.match(request.messages[1].content, /untrusted source material/);
+    }
+  }));
+
+test("greetings finish with zero peer turns or tool calls and remain visible on reload", async () =>
+  harness(async ({ api, engine }: any) => {
+    const auth = await api("/auth/signup", {
+      email: "greeting@example.test",
+      password: "long-password-123",
+    });
+    const provider = (await api("/providers", undefined, auth.cookie)).data[0]
+      .id;
+    const config = cfg([provider], 3);
+    const run = await api(
+      "/runs",
+      { prompt: "hello", config: { ...config, sandbox: true } },
+      auth.cookie,
+    );
+    assert.equal(run.status, 201);
+    assert.equal(run.data.status, "completed");
+    const saved = await api("/runs/" + run.data.id, undefined, auth.cookie);
+    assert.match(saved.data.run.final, /Hello!/);
+    assert.equal(engine.active.size, 0);
+    assert.equal(
+      saved.data.events.some((e: any) =>
+        ["agent.join", "turn.start", "tool.result", "coding.activity"].includes(
+          e.type,
+        ),
+      ),
+      false,
+    );
+    const final = saved.data.events.find((e: any) => e.type === "run.final");
+    assert.equal(final.data.calls, 0);
+    assert.equal(final.data.agents, 0);
+    const follow = await api(
+      "/runs",
+      { prompt: "thanks", config, parentId: run.data.id },
+      auth.cookie,
+    );
+    assert.equal(follow.data.status, "completed");
+    assert.match(follow.data.final, /welcome/);
+  }));

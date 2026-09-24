@@ -1,3 +1,5 @@
+import { quickReply } from "./quick-reply.ts";
+import { attachmentContext } from "../shared/attachments.ts";
 import { factorInteger, calculate, solveLinear } from "./math.ts";
 import {
   fetchPage,
@@ -386,6 +388,24 @@ export class Orchestrator {
     return false;
   }
   async start(userId: string, run: Run) {
+    const greeting = quickReply(run);
+    if (greeting) {
+      run.final = greeting;
+      run.status = "completed";
+      this.store.saveRun(userId, run);
+      this.store.event(run.id, "phase", {
+        name: "Quick reply · no model calls",
+      });
+      this.store.event(run.id, "run.final", {
+        text: greeting,
+        calls: 0,
+        agents: 0,
+        agreement: "not-applicable",
+        note: "Simple greeting or thanks; no agents, models or tools were invoked.",
+      });
+      this.store.event(run.id, "run.status", { status: "completed" });
+      return;
+    }
     const controller = new AbortController();
     this.active.set(run.id, { userId, controller });
     const signal = AbortSignal.any([
@@ -1228,7 +1248,7 @@ export class Orchestrator {
           },
           {
             role: "user",
-            content: `ORIGINAL USER GOAL:\n${run.prompt}\n\nYOUR CURRENT TASK:\n${peer.task}\n\nYOUR INBOX:\n${JSON.stringify(inbox)}\n\nLIVE SHARED BOARD (findings may be truncated):\n${snapshot(peer)}\n\n${final ? "The resource budget is ending. Produce a qualified final answer in Markdown, without control blocks. Incorporate the best evidence and explicitly preserve unresolved objections, failed checks, and uncertainty. Do not claim unanimous agreement or verified correctness." : "Collaborate toward the goal. Act on your inbox. If sufficient evidence exists, propose or critically review the current answer. Messages arriving while you generate are delivered on your next turn; the dashboard streams all activity live."}`,
+            content: `ORIGINAL USER GOAL:\n${run.prompt}${attachmentContext(run.attachments)}\n\nYOUR CURRENT TASK:\n${peer.task}\n\nYOUR INBOX:\n${JSON.stringify(inbox)}\n\nLIVE SHARED BOARD (findings may be truncated):\n${snapshot(peer)}\n\n${final ? "The resource budget is ending. Produce a qualified final answer in Markdown, without control blocks. Incorporate the best evidence and explicitly preserve unresolved objections, failed checks, and uncertainty. Do not claim unanimous agreement or verified correctness." : "Collaborate toward the goal. Act on your inbox. If sufficient evidence exists, propose or critically review the current answer. Messages arriving while you generate are delivered on your next turn; the dashboard streams all activity live."}`,
           },
         ];
         messages[0].content +=

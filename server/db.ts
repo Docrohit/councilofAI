@@ -9,6 +9,8 @@ export function openDb(directory: string) {
     CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'cookie');
     CREATE TABLE IF NOT EXISTS providers(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), config TEXT NOT NULL, secret TEXT NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL, data TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS attachment_owner ON attachments(user_id);
     CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE, type TEXT NOT NULL, at TEXT NOT NULL, data TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS event_run ON events(run_id,id);
     CREATE INDEX IF NOT EXISTS run_owner ON runs(user_id);

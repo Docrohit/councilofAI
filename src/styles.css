@@ -2863,3 +2863,76 @@ fieldset {
   border: 1px solid var(--line);
   border-radius: 6px;
 }
+
+/* Attachments stay inside the composer on desktop and narrow mobile screens. */
+.chat-attachments {
+  padding: 0.6rem 0.85rem 0;
+  max-height: 240px;
+  overflow: auto;
+}
+.attach-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.attach-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.attachment-help {
+  font-size: 0.75rem;
+  opacity: 0.8;
+  margin: 0.4rem;
+}
+.attachment-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.attachment-item > button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.5rem;
+}
+.attachment-preview {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem;
+  margin: 0.3rem 0;
+}
+.attachment-preview summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+.attachment-preview summary span {
+  opacity: 0.75;
+  font-size: 0.75rem;
+}
+.attachment-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.attachment-warning {
+  color: #efc892;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.run-attachments {
+  margin-bottom: 0.8rem;
+}

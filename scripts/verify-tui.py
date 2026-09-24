@@ -59,6 +59,9 @@ try:
     send('/agents 6\r')
     wait_for('Agent count updated')
     assert b'6 agents' in seen and b'0/60 calls' in seen
+    send('hello\r')
+    wait_for('Hello! What would you like to work on?')
+    assert b'0/60 calls' in seen
     send('/skills\r')
     wait_for('PTY skill check')
     send('/skill fixture\r')

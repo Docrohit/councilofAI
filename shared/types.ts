@@ -51,12 +51,14 @@ export interface Run {
   id: string;
   title: string;
   prompt: string;
+  userMessage?: string;
   status: RunStatus;
   config: RunConfig;
   createdAt: string;
   final: string;
   demo: boolean;
   verificationTools?: boolean;
+  attachments?: import("./attachments").Attachment[];
   parentId?: string;
   resumeState?: SharedState;
   sharedState?: SharedState;

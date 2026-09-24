@@ -250,3 +250,5 @@ equations/variables and return exact solutions plus substitution checks, or an
 inconsistent/underdetermined classification. These are bounded mathematical
 tools, not a general symbolic algebra system. Benchmark runs disable them for
 both sides' existing unaided-model comparison.
+
+Standalone greetings such as `hello` and acknowledgements such as `thanks` receive an immediate fixed reply with zero model/tool calls in v0.2.9. Greeting-prefixed tasks still use the team. This shortcut does not require a configured connection's API key to be present; normal tasks still do.

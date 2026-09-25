@@ -45,6 +45,7 @@ Enter a goal to let your agents work in this directory.
 /agents 5                               Five agents, independent of model count
 /budget 40                              Maximum Council model calls
 /web on | off                           Enable/disable public web research
+/board-msg TEXT                         Post a user message to the live board
 /skills [OFFSET]                       List project Skills
 /skill NAME [RESOURCE|-] [OFFSET]       Read paged skill instructions or resources
 /lsp status                            Show configured language servers
@@ -903,6 +904,14 @@ export async function startTui(options: TuiOptions) {
       notice = `Web research ${config.webResearch ? "enabled; search may incur OpenAI search fees" : "disabled"}. Applies to subsequent goals.`;
       return;
     }
+    if (cmd === "board-msg") {
+      if (!arg) throw new Error("Use /board-msg TEXT.");
+      if (!council.postBoard(arg))
+        throw new Error("A council must be running to post to the board.");
+      notice = "Posted to the live board; peers will read it on their next turn.";
+      tab = 2;
+      return;
+    }
     if (cmd === "budget" || cmd === "concurrency") {
       if (!config) throw new Error("Configure a model first.");
       const n = Number(arg),
@@ -1114,8 +1123,9 @@ export async function startTui(options: TuiOptions) {
     throw new Error("Unknown command. Use /help.");
   }
   async function submit() {
-    if (busy) return;
     const value = input.trim();
+    if (busy && !value.startsWith("/board-msg ")) return;
+    const wasBusy = busy;
     input = "";
     cursor = 0;
     menuDismissed = false;
@@ -1125,8 +1135,10 @@ export async function startTui(options: TuiOptions) {
       await command(value);
     } catch (e) {
       notice = (e as Error).message;
-      busy = false;
-      status = "Ready";
+      if (!wasBusy) {
+        busy = false;
+        status = "Ready";
+      }
     }
     draw();
   }
@@ -1410,7 +1422,6 @@ export async function startTui(options: TuiOptions) {
       draw();
       return;
     }
-    if (busy) return;
     if ((k.ctrl && k.name === "j") || k.name === "enter") {
       input = input.slice(0, cursor) + "\n" + input.slice(cursor);
       cursor++;

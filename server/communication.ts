@@ -5,6 +5,8 @@ export interface BoardPost {
   author: string;
   content: string;
   at: string;
+  kind?: "broadcast" | "conclusion" | "user-instruction" | "tool-observation";
+  evidenceSummary?: string;
   replyTo?: string;
   threadId?: string;
   revision?: number;
@@ -43,7 +45,12 @@ export class Communication {
       conversations: this.conversations,
     });
   }
-  broadcast(author: string, content: string, replyTo?: string) {
+  broadcast(
+    author: string,
+    content: string,
+    replyTo?: string,
+    options?: Pick<BoardPost, "kind" | "evidenceSummary">,
+  ) {
     if (replyTo && !this.board.some((p) => p.id === replyTo))
       throw new Error("Unknown board post.");
     const post: BoardPost = {
@@ -51,6 +58,10 @@ export class Communication {
       author,
       content,
       at: new Date().toISOString(),
+      kind: options?.kind || "broadcast",
+      ...(options?.evidenceSummary
+        ? { evidenceSummary: options.evidenceSummary }
+        : {}),
       ...(replyTo ? { replyTo } : {}),
     };
     this.board.push(post);
@@ -136,6 +147,8 @@ export class Communication {
       author,
       coauthors: [...thread.participants],
       content: `${proposal.summary}\n\nEvidence:\n${proposal.evidence.map((e) => `- ${e}`).join("\n")}`,
+      kind: "conclusion",
+      evidenceSummary: proposal.evidence.slice(0, 2).join("; "),
       threadId: id,
       revision: proposal.revision,
       at: new Date().toISOString(),

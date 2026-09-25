@@ -396,6 +396,11 @@ export class NativeCouncil {
     for (const id of this.engine.active.keys())
       this.engine.cancel(this.userId, id);
   }
+  postBoard(content: string) {
+    for (const id of this.engine.active.keys())
+      if (this.engine.postBoard(this.userId, id, content)) return true;
+    return false;
+  }
   async close() {
     this.stop();
     for (let i = 0; this.engine.active.size && i < 300; i++)

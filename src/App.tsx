@@ -786,6 +786,8 @@ export default function App() {
   const [events, setEvents] = useState<CouncilEvent[]>([]);
   const [config, setConfig] = useState<RunConfig>(defaults([]));
   const [prompt, setPrompt] = useState("");
+  const [boardDraft, setBoardDraft] = useState("");
+  const [boardPosting, setBoardPosting] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [draftKey, setDraftKey] = useState(0);
@@ -992,26 +994,80 @@ export default function App() {
       setError("Clipboard unavailable. Use Export to save the answer.");
     }
   }
+  const who = (id: string) =>
+    id === "user"
+      ? "You"
+      : id === "system"
+        ? "System"
+        : members.find((m) => m.id === id)?.name || id;
   function download() {
     if (!run) return;
+    const board = events
+      .filter((e) => e.type === "board.post")
+      .map((e) => e.data.post);
+    const conversations = new Map<string, any>();
+    for (const e of events)
+      if (e.type === "conversation.updated")
+        conversations.set(e.data.conversation.id, e.data.conversation);
     const text =
-      `# ${run.title}\n\n${run.final}\n\n---\n\n## Team transcript\n\n` +
+      `Council transcript\n${run.title}\nRun: ${run.id}\nStatus: ${run.status}\nCreated: ${run.createdAt}\n\n` +
+      `Goal\n${run.prompt}\n\n` +
+      `Final answer\n${run.final || "(No final answer yet.)"}\n\n` +
+      `Board messages\n${
+        board.length
+          ? board
+              .map(
+                (p) =>
+                  `[${p.at}] ${p.kind || "broadcast"} · ${(p.coauthors || [p.author]).map(who).join(" + ")}\n${p.content}${p.evidenceSummary ? `\nEvidence/deduction summary: ${p.evidenceSummary}` : ""}`,
+              )
+              .join("\n\n")
+          : "(No board messages.)"
+      }\n\n` +
+      `Agent discussion\n` +
       [...view.turns.values()]
         .map((t) => `### ${t.name} · ${t.model}\n\n${clean(t.text)}`)
         .join("\n\n") +
-      "\n\n## Engagement\n\n" +
+      "\n\nEngagement\n" +
       events
         .filter((e) => e.type === "agent.message")
         .map((e) => `${e.data.name} → ${e.data.to}: ${e.data.content}`)
-        .join("\n\n");
+        .join("\n\n") +
+      "\n\nConversations\n" +
+      ([...conversations.values()]
+        .map(
+          (t) =>
+            `${t.participants.map(who).join(" <-> ")} · ${t.topic}\n${t.messages.map((m: any) => `${who(m.author)}: ${m.content}`).join("\n")}\n${t.proposal ? `Conclusion r${t.proposal.revision}: ${t.proposal.summary}\nEvidence: ${t.proposal.evidence.join("; ")}` : ""}`,
+        )
+        .join("\n\n") || "(No direct conversations.)") +
+      "\n\nFindings\n" +
+      (knowledge.findings
+        .map(
+          (f) =>
+            `${f.key} · revision ${f.revision}\n${f.claim}\nEvidence: ${f.evidence.join("; ")}`,
+        )
+        .join("\n\n") || "(No findings.)");
     const url = URL.createObjectURL(
-      new Blob([text], { type: "text/markdown" }),
+      new Blob([text], { type: "text/plain" }),
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = `council-${run.id.slice(0, 8)}.md`;
+    a.download = `council-${run.id.slice(0, 8)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+  async function postBoard() {
+    if (!run || !active || !boardDraft.trim() || boardPosting) return;
+    setBoardPosting(true);
+    setError("");
+    try {
+      await api(`/runs/${run.id}/board`, "POST", { content: boardDraft });
+      setBoardDraft("");
+      setTab("board");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBoardPosting(false);
+    }
   }
   if (checking)
     return (
@@ -1458,6 +1514,32 @@ export default function App() {
               </div>
             )}
             <div className="composer-wrap">
+              {active && run && (
+                <form
+                  className="board-composer"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    postBoard();
+                  }}
+                >
+                  <label>
+                    Send live message to board
+                    <textarea
+                      value={boardDraft}
+                      onChange={(e) => setBoardDraft(e.target.value)}
+                      placeholder="Correct direction, add evidence, or ask the team to realign…"
+                      maxLength={4000}
+                      disabled={boardPosting}
+                    />
+                  </label>
+                  <button
+                    className="quiet-button bordered"
+                    disabled={!boardDraft.trim() || boardPosting}
+                  >
+                    {boardPosting ? "Posting…" : "Post to board"}
+                  </button>
+                </form>
+              )}
               <form
                 className={`composer ${active ? "running" : ""}`}
                 onSubmit={(e) => {
@@ -2099,13 +2181,25 @@ function TeamSettings({
       };
     });
   }
-  const update = (index: number, key: keyof Member, data: string) =>
+  const patchMember = (index: number, patch: Partial<Member>) =>
     setValue((old) => ({
       ...old,
       members: old.members.map((m, i) =>
-        i === index ? { ...m, [key]: data } : m,
+        i === index ? { ...m, ...patch } : m,
       ),
     }));
+  const update = (index: number, key: keyof Member, data: string) =>
+    patchMember(index, { [key]: data } as Partial<Member>);
+  const tokenTier = (m: Member) =>
+    m.maxOutputTokens === undefined
+      ? "default"
+      : m.maxOutputTokens === 2048
+        ? "low"
+        : m.maxOutputTokens === 8192
+          ? "mid"
+          : m.maxOutputTokens === 16384
+            ? "high"
+            : "custom";
   return (
     <Modal title="Assemble your council" close={close} wide>
       <p className="modal-intro">
@@ -2205,6 +2299,67 @@ function TeamSettings({
                       </option>
                     ))}
                 </select>
+              </label>
+              <label>
+                Role
+                <input
+                  value={m.role}
+                  maxLength={200}
+                  onChange={(e) => update(i, "role", e.target.value)}
+                />
+              </label>
+              <label>
+                Token tier
+                <select
+                  value={tokenTier(m)}
+                  onChange={(e) => {
+                    const tiers: Record<string, number | undefined> = {
+                      default: undefined,
+                      low: 2048,
+                      mid: 8192,
+                      high: 16384,
+                      custom: m.maxOutputTokens || value.maxOutputTokens,
+                    };
+                    patchMember(i, { maxOutputTokens: tiers[e.target.value] });
+                  }}
+                >
+                  <option value="default">Default run cap</option>
+                  <option value="low">Low · 2K</option>
+                  <option value="mid">Mid · 8K</option>
+                  <option value="high">High · 16K</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              {tokenTier(m) === "custom" && (
+                <label>
+                  Custom tokens
+                  <input
+                    type="number"
+                    min={256}
+                    max={16384}
+                    value={m.maxOutputTokens || value.maxOutputTokens}
+                    onChange={(e) =>
+                      patchMember(i, {
+                        maxOutputTokens: Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+              )}
+              <label className="member-prompt">
+                System prompt / agent instructions
+                <textarea
+                  value={m.systemPrompt || ""}
+                  maxLength={4000}
+                  placeholder="Optional extra instructions for this peer. Keep them subordinate to the user goal and project rules."
+                  onChange={(e) =>
+                    patchMember(i, {
+                      systemPrompt: e.target.value.trim()
+                        ? e.target.value
+                        : undefined,
+                    })
+                  }
+                />
               </label>
               <button
                 className="icon-button"

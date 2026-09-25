@@ -19,7 +19,12 @@ export function CommunicationPanel({
     if (event.type === "conversation.updated")
       threads.set(event.data.conversation.id, event.data.conversation);
   }
-  const name = (id: string) => members.find((m) => m.id === id)?.name || id;
+  const name = (id: string) =>
+    id === "user"
+      ? "You"
+      : id === "system"
+        ? "System"
+        : members.find((m) => m.id === id)?.name || id;
   return (
     <section className="communication-panel">
       <h2>
@@ -44,9 +49,19 @@ export function CommunicationPanel({
                 <span>
                   {post.threadId
                     ? `Joint conclusion · revision ${post.revision}`
-                    : "Broadcast"}
+                    : post.kind === "user-instruction"
+                      ? "User board instruction"
+                      : post.kind === "tool-observation"
+                        ? "Tool observation"
+                        : "Broadcast"}
                 </span>
               </header>
+              <p className="board-suffix">
+                Posted by {(post.coauthors || [post.author]).map(name).join(" + ")}
+                {post.evidenceSummary
+                  ? ` · Evidence/deduction: ${post.evidenceSummary}`
+                  : ""}
+              </p>
               {post.replyTo && (
                 <a href={`#post-${post.replyTo}`}>Reply to earlier post</a>
               )}

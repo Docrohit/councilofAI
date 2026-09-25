@@ -347,6 +347,220 @@ test("stop cancels an active run and no final answer is emitted", async () =>
       false,
     );
   }));
+test("user can post a live board message that is queued for peers", async () => {
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      user = body.messages[1].content;
+    const board = JSON.parse(
+      user
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    await pause(120);
+    const output = board.candidate
+      ? {
+          review: {
+            candidateId: board.candidate.id,
+            agree: true,
+            reason: "The user board instruction was considered.",
+          },
+        }
+      : {
+          proposal: {
+            answer: "Adjusted after checking the live board.",
+            rationale: "The board context is part of the shared state.",
+          },
+        };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [
+            { delta: { content: "```council\n" + JSON.stringify(output) + "\n```" } },
+          ],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Board User",
+        email: "board-user@example.test",
+        password: "long-password-123",
+      });
+      const provider = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const started = await api(
+        "/runs",
+        {
+          prompt: "Solve while accepting live board corrections",
+          config: cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 8 }),
+        },
+        auth.cookie,
+      );
+      let posted;
+      for (let i = 0; i < 20; i++) {
+        posted = await api(
+          `/runs/${started.data.id}/board`,
+          { content: "Please verify the direction before finalizing." },
+          auth.cookie,
+        );
+        if (posted.status === 200) break;
+        await pause(20);
+      }
+      assert.equal(posted.status, 200);
+      const result = await done(api, auth.cookie, started.data.id);
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "board.post" &&
+            e.data.post.kind === "user-instruction" &&
+            e.data.post.author === "user" &&
+            e.data.post.content.includes("verify the direction"),
+        ),
+      );
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "agent.message" &&
+            e.data.from === "user" &&
+            e.data.delivery.includes("next model turn"),
+        ),
+      );
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
+test("live board message invalidates stale in-flight candidate reviews", async () => {
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      user = body.messages[1].content;
+    const board = JSON.parse(
+      user
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    const inbox = JSON.parse(user.split("YOUR INBOX:\n")[1].split("\n\n")[0]);
+    const fresh = inbox.some((m: any) =>
+      String(m.content).includes("Candidate proposal/review was ignored"),
+    );
+    let output;
+    if (!board.candidate)
+      output = {
+        proposal: {
+          answer: "Initial answer before user board update.",
+          rationale: "Initial fixture candidate.",
+        },
+      };
+    else {
+      await pause(fresh ? 0 : 180);
+      output = {
+        review: {
+          candidateId: board.candidate.id,
+          agree: true,
+          reason: fresh
+            ? "Fresh review after reading the user board message."
+            : "Stale review from the old board snapshot.",
+        },
+      };
+    }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [
+            { delta: { content: "```council\n" + JSON.stringify(output) + "\n```" } },
+          ],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Stale Board",
+        email: "stale-board@example.test",
+        password: "long-password-123",
+      });
+      const provider = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const started = await api(
+        "/runs",
+        {
+          prompt: "Reject stale candidate reviews after board updates",
+          config: cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 10 }),
+        },
+        auth.cookie,
+      );
+      for (let i = 0; i < 50; i++) {
+        const snapshot = await api("/runs/" + started.data.id, undefined, auth.cookie);
+        if (
+          snapshot.data.events.some((e: any) => e.type === "candidate.proposed")
+        )
+          break;
+        await pause(20);
+      }
+      const posted = await api(
+        `/runs/${started.data.id}/board`,
+        { content: "User changed the verification direction." },
+        auth.cookie,
+      );
+      assert.equal(posted.status, 200);
+      const result = await done(api, auth.cookie, started.data.id);
+      assert.equal(result.run.status, "completed");
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "warning" &&
+            String(e.data.message).includes("Candidate proposal/review was ignored"),
+        ),
+      );
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "candidate.review" &&
+            e.data.reason === "Fresh review after reading the user board message.",
+        ),
+      );
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
 test("budget exhaustion preserves state and continuation reuses the existing finding", async () =>
   harness(async ({ api }: any) => {
     const a = await api("/auth/signup", {

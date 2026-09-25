@@ -860,6 +860,21 @@ export function createApp(directory: string, production = false) {
     engine.cancel(userOf(res).id, run.id);
     res.json({ ok: true });
   });
+  app.post("/api/runs/:id/board", (req, res) => {
+    const run = store.getRun(userOf(res).id, req.params.id as string);
+    if (!run) {
+      res.sendStatus(404);
+      return;
+    }
+    const { content } = z
+      .object({ content: z.string().trim().min(1).max(4000) })
+      .parse(req.body);
+    if (!engine.postBoard(userOf(res).id, run.id, content)) {
+      res.status(409).json({ error: "This session is not currently running." });
+      return;
+    }
+    res.json({ ok: true });
+  });
   app.get("/api/runs/:id/events", (req, res) => {
     const run = store.getRun(userOf(res).id, req.params.id as string);
     if (!run) {

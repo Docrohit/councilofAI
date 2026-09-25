@@ -842,6 +842,27 @@ fieldset {
   max-width: 970px;
   margin: 0 auto;
 }
+.board-composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid #425633;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #172111;
+}
+.board-composer label {
+  font-size: 10px;
+  color: #9bae8b;
+}
+.board-composer textarea {
+  min-height: 56px;
+  max-height: 140px;
+  resize: vertical;
+  font-size: 12px;
+}
 .composer {
   background: #20251d;
   border: 1px solid #424d36;
@@ -1794,28 +1815,30 @@ fieldset {
   gap: 16px;
 }
 .member-edit {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) minmax(180px, 1.4fr) minmax(150px, 1fr) minmax(120px, 0.8fr) auto;
   align-items: center;
   gap: 10px;
   border: 1px solid #3d4f2f;
   border-radius: 8px;
   padding: 13px;
 }
-.member-edit label:nth-child(2) {
-  flex: 1;
-  min-width: 0;
-}
-.member-edit label:nth-child(3) {
-  flex: 2;
-  min-width: 0;
-}
 .member-edit label {
   font-size: 10px;
+  min-width: 0;
 }
 .member-edit input,
-.member-edit select {
+.member-edit select,
+.member-edit textarea {
   font-size: 11px;
   padding: 9px;
+}
+.member-edit textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+.member-prompt {
+  grid-column: 2 / -2;
 }
 .team-editor-actions {
   display: flex;
@@ -1969,6 +1992,13 @@ fieldset {
   }
 }
 @media (max-width: 700px) {
+  .board-composer,
+  .member-edit {
+    grid-template-columns: 1fr;
+  }
+  .member-prompt {
+    grid-column: auto;
+  }
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
@@ -2720,6 +2750,12 @@ fieldset {
 }
 .communication-card header span {
   color: var(--muted);
+}
+.board-suffix {
+  margin: 6px 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
 }
 .conversation-message {
   border-left: 2px solid var(--line);

@@ -22,6 +22,7 @@ export const commands = [
     .map((x) => [x.toLowerCase(), `Open ${x}`]),
   ["files", "Browse project files"],
   ["web", "Toggle public web research"],
+  ["board-msg", "Post a user message to the live board"],
   ["skills", "List project Skills"],
   ["lsp status", "Show language servers"],
   ["budget", "Set model-call budget"],

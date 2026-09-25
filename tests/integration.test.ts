@@ -406,11 +406,14 @@ test("user can post a live board message that is queued for peers", async () => 
         },
         auth.cookie,
       );
+      const config = cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 8 });
+      config.members[0].name = "Peer 4";
+      config.members[1].name = "検証";
       const started = await api(
         "/runs",
         {
           prompt: "Solve while accepting live board corrections",
-          config: cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 8 }),
+          config,
         },
         auth.cookie,
       );
@@ -418,7 +421,10 @@ test("user can post a live board message that is queued for peers", async () => 
       for (let i = 0; i < 20; i++) {
         posted = await api(
           `/runs/${started.data.id}/board`,
-          { content: "Please verify the direction before finalizing." },
+          {
+            content:
+              "Please @Peer4 and @検証 verify the direction before finalizing.",
+          },
           auth.cookie,
         );
         if (posted.status === 200) break;
@@ -432,7 +438,8 @@ test("user can post a live board message that is queued for peers", async () => 
             e.type === "board.post" &&
             e.data.post.kind === "user-instruction" &&
             e.data.post.author === "user" &&
-            e.data.post.content.includes("verify the direction"),
+            e.data.post.content.includes("verify the direction") &&
+            e.data.post.evidenceSummary === "Tagged: Peer 4, 検証",
         ),
       );
       assert(
@@ -440,6 +447,8 @@ test("user can post a live board message that is queued for peers", async () => 
           (e: any) =>
             e.type === "agent.message" &&
             e.data.from === "user" &&
+            e.data.tagged.includes("peer-1") &&
+            e.data.tagged.includes("peer-2") &&
             e.data.delivery.includes("next model turn"),
         ),
       );

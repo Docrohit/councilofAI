@@ -1527,7 +1527,7 @@ export default function App() {
                     <textarea
                       value={boardDraft}
                       onChange={(e) => setBoardDraft(e.target.value)}
-                      placeholder="Correct direction, add evidence, or ask the team to realign…"
+                      placeholder="Correct direction, add evidence, or tag @Atlas to address a specific agent…"
                       maxLength={4000}
                       disabled={boardPosting}
                     />

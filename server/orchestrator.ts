@@ -548,8 +548,30 @@ export class Orchestrator {
     if (activeRun)
       activeRun.postBoard = (content: string) => {
         if (!acceptingBoardPosts) return false;
+        const escapeMention = (value: string) =>
+          value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const mentions = (value: string) => {
+          const trimmed = value.trim();
+          if (!trimmed) return false;
+          const flexible = trimmed
+            .split(/\s+/)
+            .filter(Boolean)
+            .map(escapeMention)
+            .join("\\s*");
+          const exact = new RegExp(
+            `@${flexible}(?=$|[\\s,.;:!?\\])}])`,
+            "iu",
+          );
+          return exact.test(content);
+        };
+        const tagged = [...peers.values()].filter(
+          (peer) => mentions(peer.member.name) || mentions(peer.member.id),
+        );
         const post = communication.broadcast("user", content, undefined, {
           kind: "user-instruction",
+          evidenceSummary: tagged.length
+            ? `Tagged: ${tagged.map((p) => p.member.name).join(", ")}`
+            : undefined,
         });
         boardInstructionVersion++;
         if (candidate) {
@@ -563,10 +585,11 @@ export class Orchestrator {
         }
         for (const peer of peers.values())
           if (!peer.unavailable) {
+            const addressed = tagged.some((p) => p.member.id === peer.member.id);
             peer.inbox.push({
               from: "user",
               kind: "challenge",
-              content: `User board message ${post.id}: ${content}\nRe-align your plan, strategy or verification if this changes the goal, evidence or direction. Discuss concrete impacts with the team.`,
+              content: `User board message ${post.id}${addressed ? " specifically tags you" : tagged.length ? ` tags ${tagged.map((p) => p.member.name).join(", ")}` : ""}: ${content}\nRe-align your plan, strategy or verification if this changes the goal, evidence or direction. Discuss concrete impacts with the team.${addressed ? " Respond directly to the user-directed point for your role." : ""}`,
             });
             if (peer.inbox.length > 40)
               peer.inbox.splice(0, peer.inbox.length - 40);
@@ -578,6 +601,7 @@ export class Orchestrator {
           to: "all",
           content,
           kind: "board",
+          tagged: tagged.map((p) => p.member.id),
           delivery: "Queued for every available peer’s next model turn",
         });
         checkpoint();

@@ -45,7 +45,7 @@ Enter a goal to let your agents work in this directory.
 /agents 5                               Five agents, independent of model count
 /budget 40                              Maximum Council model calls
 /web on | off                           Enable/disable public web research
-/board-msg TEXT                         Post a user message to the live board
+/board-msg TEXT                         Post to live board; use @agentname to tag
 /skills [OFFSET]                       List project Skills
 /skill NAME [RESOURCE|-] [OFFSET]       Read paged skill instructions or resources
 /lsp status                            Show configured language servers
@@ -297,6 +297,36 @@ export async function startTui(options: TuiOptions) {
         : Math.max(0, lines.length - area - scroll);
     const visible = lines.slice(bottom, bottom + area);
     const menu = suggestions();
+    const composeTitle = busy
+      ? "Working · /board-msg @agent to guide live work"
+      : "Ask Council";
+    const topBorder = `┌─ ${composeTitle} `;
+    const bottomLabel = `${config?.members.length || 0} agents · ${config?.providerIds.join(" + ") || "/connections to add models"}`;
+    const bottomBorder = `└─ ${bottomLabel} `;
+    const inputSliceStart = Math.max(
+      0,
+      wrapTerminal(input.slice(0, cursor), width - 4).length - inputRows,
+    );
+    const inputLine = (i: number) =>
+      permission
+        ? i
+          ? ""
+          : "[y] once · [a] session · [n] reject"
+        : editor
+          ? i
+            ? ""
+            : "Ctrl+S save · Ctrl+Z undo · Esc close"
+          : dialog
+            ? i
+              ? ""
+              : "Complete the dialog above · Esc cancel"
+            : input
+              ? draftLines.slice(inputSliceStart)[i] || ""
+              : i
+                ? ""
+                : busy
+                  ? "Type /board-msg @agent message to guide live work"
+                  : "Ask anything… Type / for commands";
     if (menu.length) {
       menuIndex = Math.min(menuIndex, menu.length - 1);
       const start = Math.max(0, menuIndex - Math.min(4, area - 2));
@@ -367,50 +397,25 @@ export async function startTui(options: TuiOptions) {
           : row(visible[i] || ""),
       ),
       row(dialog?.error || notice),
-      row(
-        "┌─ " +
-          (busy ? "Working · Esc stop" : "Ask Council") +
-          " ─".repeat(Math.ceil(width / 2)),
-      ),
+      row(topBorder + "─".repeat(Math.max(0, width - topBorder.length - 1)) + "┐"),
       ...Array.from(
         { length: inputRows },
         (_, i) =>
           row(
-            "│ " +
-              (permission
-                ? i
-                  ? ""
-                  : "[y] once · [a] session · [n] reject"
-                : editor
-                  ? i
-                    ? ""
-                    : "Ctrl+S save · Ctrl+Z undo · Esc close"
-                  : dialog
-                    ? i
-                      ? ""
-                      : "Complete the dialog above · Esc cancel"
-                    : busy
-                      ? i
-                        ? ""
-                        : "Tab views · Ctrl+P commands · PageUp/PageDown scroll"
-                      : input
-                        ? draftLines.slice(
-                            Math.max(
-                              0,
-                              wrapTerminal(input.slice(0, cursor), width - 4)
-                                .length - inputRows,
-                            ),
-                          )[i] || ""
-                        : i
-                          ? ""
-                          : "Ask anything… Type / for commands  │"),
+            "│ " + inputLine(i),
             width - 1,
           ) + "│",
       ),
       row(
-        `└─ ${config?.members.length || 0} agents · ${config?.providerIds.join(" + ") || "/connections to add models"}`,
+        bottomBorder +
+          "─".repeat(Math.max(0, width - bottomBorder.length - 1)) +
+          "┘",
       ),
-      row(" Enter send · Ctrl+J newline · Ctrl+P commands · Tab views · /quit"),
+      row(
+        busy
+          ? " /board-msg sends live guidance · Esc/Ctrl+C stop · Tab views"
+          : " Enter send · Ctrl+J newline · Ctrl+P commands · Tab views · /quit",
+      ),
     ];
     process.stdout.write(
       "\x1b[H" + frame.slice(0, height).join("\r\n") + "\x1b[J",
@@ -1175,6 +1180,16 @@ export async function startTui(options: TuiOptions) {
       pasting = false;
       const text = cleanTerminal(pasteText.replace(/\r/g, "\n"));
       pasteText = "";
+      if (busy && text.startsWith("/board-msg ")) {
+        input = (input.slice(0, cursor) + text + input.slice(cursor)).slice(
+          0,
+          20000,
+        );
+        cursor = Math.min(input.length, cursor + text.length);
+        menuDismissed = true;
+        draw();
+        return;
+      }
       if (permission || busy || editor) {
         notice =
           "Paste ignored during work or in the editor. Use ordinary keys.";

@@ -3,12 +3,17 @@ import { Paperclip, X, LoaderCircle } from "lucide-react";
 import { api } from "./api";
 import {
   ATTACHMENT_ACCEPT,
+  ATTACHMENT_IMAGE_MAX_BYTES,
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_FILES,
   type Attachment,
 } from "../shared/attachments";
 
+const imagePattern = /\.(png|jpe?g|webp)$/i;
+const documentPattern = /\.(md|txt|pdf|docx|apk)$/i;
+
 export function AttachmentPreview({ item }: { item: Attachment }) {
+  const image = !!item.dataUrl;
   return (
     <details className="attachment-preview">
       <summary>
@@ -17,7 +22,12 @@ export function AttachmentPreview({ item }: { item: Attachment }) {
           {item.size < 1024
             ? `${item.size} B`
             : `${(item.size / 1024).toFixed(0)} KB`}{" "}
-          · {item.kind === "apk" ? "Package report" : "Extracted text"}
+          ·{" "}
+          {image
+            ? "Image input"
+            : item.kind === "apk"
+              ? "Package report"
+              : "Extracted text"}
         </span>
       </summary>
       {item.warnings.map((w) => (
@@ -25,7 +35,7 @@ export function AttachmentPreview({ item }: { item: Attachment }) {
           {w}
         </p>
       ))}
-      <pre>{item.text}</pre>
+      {item.text && <pre>{item.text}</pre>}
     </details>
   );
 }
@@ -80,13 +90,14 @@ export function ChatAttachments({
     onBusy(true);
     try {
       for (const file of files) {
+        const image = imagePattern.test(file.name);
         if (
-          !/\.(md|txt|pdf|docx|apk)$/i.test(file.name) ||
+          (!documentPattern.test(file.name) && !image) ||
           file.size === 0 ||
-          file.size > ATTACHMENT_MAX_BYTES
+          file.size > (image ? ATTACHMENT_IMAGE_MAX_BYTES : ATTACHMENT_MAX_BYTES)
         ) {
           throw new Error(
-            "Choose a nonempty MD, TXT, PDF, DOCX or APK file up to 20 MB.",
+            "Choose a nonempty MD, TXT, PDF, DOCX or APK file up to 20 MB, or PNG, JPG or WEBP image up to 8 MB.",
           );
         }
         setProgress(`Reading ${file.name}…`);
@@ -147,7 +158,7 @@ export function ChatAttachments({
         <Paperclip size={16} /> Attach files
       </button>
       <span className="attachment-help">
-        MD, TXT, PDF, DOCX, APK · 20 MB each · 4 files
+        MD, TXT, PDF, DOCX, APK · 20 MB; PNG, JPG, WEBP · 8 MB · 4 files
       </span>
       {inherited > 0 && (
         <p className="attachment-help">
@@ -183,8 +194,8 @@ export function ChatAttachments({
       ))}
       {!!items.length && (
         <p className="attachment-help">
-          Preview the extracted content above. Sending shares it with every
-          model in your team. Original files are not retained.
+          Preview extracted text or image metadata above. Sending shares it with
+          every model in your team. Original files are not retained.
         </p>
       )}
     </div>

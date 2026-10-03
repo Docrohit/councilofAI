@@ -31,6 +31,8 @@ that their infrastructure is implemented or live.
 - [Native CLI/TUI](NATIVE.md): model configuration, local projects and upgrades.
 - [RunPod models](RUNPOD_MODELS.md): self-hosted vLLM, SSH tunnel and bridge setup.
 - [Goals, Telegram, Media and API](GOALS_TELEGRAM_MEDIA_API.md): goal mode, Telegram bridge, image input and API primitives.
+- [Media orchestration learnings from Hygaar/HDB](MEDIA_ORCHESTRATION_LEARNINGS_HYGAAR.md): source-backed design input for future Council image/video tools.
+- [Agent orchestration learnings from TradingAgents](AGENT_ORCHESTRATION_LEARNINGS_TRADING_AGENTS.md): source-backed design input for goal roles, evidence debate, model catalogs and checkpointed long runs.
 - [Coding](CODING.md): native/hosted capabilities and exact limitations.
 - [Communication](COMMUNICATION.md): broadcasts, direct threads and shared conclusions.
 - [Research](RESEARCH.md): opt-in web tools and provider limitations.

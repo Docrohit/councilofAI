@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { DB } from "./db.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 import type { Store } from "./store.ts";
+import { prepareAttachment } from "./attachments.ts";
 import type { CouncilEvent, Run, RunConfig } from "../shared/types.ts";
+import type { Attachment } from "../shared/attachments.ts";
 
 interface TelegramConfig {
   enabled: boolean;
@@ -19,6 +21,20 @@ interface TelegramUpdate {
     message_id: number;
     text?: string;
     caption?: string;
+    photo?: {
+      file_id: string;
+      file_unique_id?: string;
+      file_size?: number;
+      width: number;
+      height: number;
+    }[];
+    document?: {
+      file_id: string;
+      file_unique_id?: string;
+      file_name?: string;
+      mime_type?: string;
+      file_size?: number;
+    };
     chat: { id: number; type: string; title?: string; username?: string };
     from?: { id: number; username?: string; first_name?: string };
   };
@@ -28,7 +44,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function chunks(text: string, limit = 3800) {
   const result: string[] = [];
-  for (let i = 0; i < text.length; i += limit) result.push(text.slice(i, i + limit));
+  for (let i = 0; i < text.length; i += limit)
+    result.push(text.slice(i, i + limit));
   return result.length ? result : [""];
 }
 
@@ -58,6 +75,7 @@ export class TelegramBridge {
         goalMode?: boolean;
         minGoalMinutes?: number;
         maxGoalMinutes?: number;
+        attachmentIds?: string[];
       },
     ) => Promise<Run>,
   ) {}
@@ -78,10 +96,7 @@ export class TelegramBridge {
     };
   }
 
-  async configure(
-    userId: string,
-    input: { token?: string; enabled: boolean },
-  ) {
+  async configure(userId: string, input: { token?: string; enabled: boolean }) {
     const existing = this.row(userId);
     const config: TelegramConfig = existing
       ? JSON.parse(existing.config)
@@ -138,9 +153,7 @@ export class TelegramBridge {
 
   private row(userId: string) {
     return this.db
-      .prepare(
-        "SELECT * FROM integrations WHERE user_id=? AND kind='telegram'",
-      )
+      .prepare("SELECT * FROM integrations WHERE user_id=? AND kind='telegram'")
       .get(userId) as any;
   }
 
@@ -161,11 +174,16 @@ export class TelegramBridge {
       const token = this.store.secrets.decrypt(row.secret);
       const config = JSON.parse(row.config) as TelegramConfig;
       try {
-        const result = await this.call(token, "getUpdates", {
-          offset: config.offset,
-          timeout: 25,
-          allowed_updates: ["message"],
-        }, signal);
+        const result = await this.call(
+          token,
+          "getUpdates",
+          {
+            offset: config.offset,
+            timeout: 25,
+            allowed_updates: ["message"],
+          },
+          signal,
+        );
         for (const update of (result || []) as TelegramUpdate[]) {
           await this.handleUpdate(userId, token, update);
           this.saveConfig(userId, (next) => {
@@ -189,10 +207,13 @@ export class TelegramBridge {
     update: TelegramUpdate,
   ) {
     const message = update.message;
-    const text = (message?.text || message?.caption || "").trim();
-    if (!message || !text) return;
+    if (!message) return;
+    const attachments = await this.telegramAttachments(userId, token, message);
+    const text = (message.text || message.caption || "").trim();
+    if (!text && !attachments.length) return;
+    const effectiveText = text || "Review the attached Telegram file.";
     const chatId = String(message.chat.id);
-    if (/^\/start(?:@\S+)?/i.test(text)) {
+    if (/^\/start(?:@\S+)?/i.test(effectiveText)) {
       await this.send(
         token,
         chatId,
@@ -200,7 +221,7 @@ export class TelegramBridge {
       );
       return;
     }
-    if (/^\/status(?:@\S+)?/i.test(text)) {
+    if (/^\/status(?:@\S+)?/i.test(effectiveText)) {
       const active = this.activeRun(userId, chatId);
       await this.send(
         token,
@@ -211,23 +232,64 @@ export class TelegramBridge {
       );
       return;
     }
-    const goal = parseGoal(text);
+    const goal = parseGoal(effectiveText);
     const active = this.activeRun(userId, chatId);
     if (goal && active && ["queued", "running"].includes(active.status)) {
       const result = this.engine.updateGoal(userId, active.id, goal.goal, {
         minMinutes: goal.minMinutes,
         maxMinutes: goal.maxMinutes,
       });
+      if (result.ok && attachments.length) {
+        const attached = this.engine.addAttachments(
+          userId,
+          active.id,
+          attachments,
+          `Telegram goal file input: ${goal.goal}`,
+        );
+        if (!attached.ok)
+          await this.send(
+            token,
+            chatId,
+            attached.error || "Goal updated, but file attach failed.",
+          );
+      }
       await this.send(
         token,
         chatId,
-        result.ok ? "Goal updated. I’ll only relay board progress and the final answer." : result.error || "Goal update failed.",
+        result.ok
+          ? "Goal updated. I’ll only relay board progress and the final answer."
+          : result.error || "Goal update failed.",
       );
       return;
     }
     if (active && ["queued", "running"].includes(active.status)) {
-      if (!this.engine.postBoard(userId, active.id, `Telegram input: ${text}`))
-        await this.send(token, chatId, "The session is no longer accepting messages.");
+      if (attachments.length) {
+        const result = this.engine.addAttachments(
+          userId,
+          active.id,
+          attachments,
+          text ? `Telegram input: ${text}` : "Telegram file input.",
+        );
+        if (!result.ok)
+          await this.send(
+            token,
+            chatId,
+            result.error || "Could not attach this file.",
+          );
+        return;
+      }
+      if (
+        !this.engine.postBoard(
+          userId,
+          active.id,
+          `Telegram input: ${effectiveText}`,
+        )
+      )
+        await this.send(
+          token,
+          chatId,
+          "The session is no longer accepting messages.",
+        );
       return;
     }
     const config = this.teamConfig(userId);
@@ -243,11 +305,15 @@ export class TelegramBridge {
       config.goalMode = true;
       config.minGoalMinutes = goal.minMinutes;
       config.maxMinutes = Math.max(config.maxMinutes, goal.maxMinutes);
-      config.maxCalls = Math.max(config.maxCalls, config.members.length * 6 + 12);
+      config.maxCalls = Math.max(
+        config.maxCalls,
+        config.members.length * 6 + 12,
+      );
     }
     const run = await this.startRun(userId, {
-      prompt: goal?.goal || text,
+      prompt: goal?.goal || effectiveText,
       config,
+      attachmentIds: await this.persistAttachments(userId, attachments),
       ...(goal
         ? {
             goalMode: true,
@@ -258,7 +324,10 @@ export class TelegramBridge {
     });
     this.saveConfig(userId, (next) => {
       next.chats ||= {};
-      next.chats[chatId] = { runId: run.id, updatedAt: new Date().toISOString() };
+      next.chats[chatId] = {
+        runId: run.id,
+        updatedAt: new Date().toISOString(),
+      };
     });
     this.watchRun(userId, token, chatId, run.id);
     await this.send(
@@ -342,6 +411,55 @@ export class TelegramBridge {
         disable_web_page_preview: true,
       });
     }
+  }
+
+  private async telegramAttachments(
+    userId: string,
+    token: string,
+    message: NonNullable<TelegramUpdate["message"]>,
+  ): Promise<Attachment[]> {
+    const specs: { fileId: string; name: string }[] = [];
+    if (message.photo?.length) {
+      const photo = [...message.photo].sort(
+        (a, b) => (b.file_size || 0) - (a.file_size || 0),
+      )[0];
+      specs.push({
+        fileId: photo.file_id,
+        name: `telegram-photo-${message.message_id}.jpg`,
+      });
+    }
+    if (message.document)
+      specs.push({
+        fileId: message.document.file_id,
+        name:
+          message.document.file_name ||
+          `telegram-document-${message.message_id}.txt`,
+      });
+    const attachments: Attachment[] = [];
+    for (const spec of specs) {
+      const file = await this.call(token, "getFile", { file_id: spec.fileId });
+      const response = await fetch(
+        `https://api.telegram.org/file/bot${token}/${file.file_path}`,
+      );
+      if (!response.ok)
+        throw new Error(`Telegram file download failed: ${response.status}`);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      attachments.push(await prepareAttachment(buffer, spec.name));
+    }
+    return attachments;
+  }
+
+  private async persistAttachments(userId: string, attachments: Attachment[]) {
+    const ids: string[] = [];
+    for (const item of attachments) {
+      this.db
+        .prepare(
+          "INSERT INTO attachments(id,user_id,expires,data) VALUES(?,?,?,?)",
+        )
+        .run(item.id, userId, Date.now() + 86400_000, JSON.stringify(item));
+      ids.push(item.id);
+    }
+    return ids;
   }
 
   private async call(

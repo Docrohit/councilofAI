@@ -33,6 +33,7 @@ import {
 } from "./benchmarks.ts";
 import { complete } from "./providers.ts";
 import { TelegramBridge } from "./telegram.ts";
+import { clearKite, kiteStatus, saveKite } from "./kite.ts";
 import type { Provider, Run, User } from "../shared/types.ts";
 
 const credentials = z.object({
@@ -198,6 +199,7 @@ export function createApp(directory: string, production = false) {
       goalMode?: boolean;
       minGoalMinutes?: number;
       maxGoalMinutes?: number;
+      attachmentIds?: string[];
     },
   ) => {
     const prompt = z.string().trim().min(1).max(20_000).parse(input.prompt);
@@ -217,13 +219,17 @@ export function createApp(directory: string, production = false) {
       config.members.some((m) => !config.providerIds.includes(m.providerId)) ||
       config.providerIds.some((id) => !providers.find((p) => p.id === id))
     )
-      throw new Error("Invalid saved team or budget. Update your Council team.");
+      throw new Error(
+        "Invalid saved team or budget. Update your Council team.",
+      );
     const selected = providers.filter((p) => config.providerIds.includes(p.id));
     if (
       selected.some((p) => p.kind === "demo") &&
       selected.some((p) => p.kind !== "demo")
     )
-      throw new Error("Use an entirely demo team or entirely real connections.");
+      throw new Error(
+        "Use an entirely demo team or entirely real connections.",
+      );
     const goalMin = Math.min(
       Math.max(input.minGoalMinutes ?? config.minGoalMinutes ?? 10, 1),
       180,
@@ -239,7 +245,23 @@ export function createApp(directory: string, production = false) {
         minGoalMinutes: goalMin,
         maxMinutes: goalMax,
       };
+    let attachments: Attachment[] = [];
+    for (const id of new Set(input.attachmentIds || [])) {
+      const row = db
+        .prepare(
+          "SELECT data FROM attachments WHERE id=? AND user_id=? AND expires>?",
+        )
+        .get(id, userId, Date.now()) as { data: string } | undefined;
+      if (!row)
+        throw new Error(
+          "A Telegram attachment expired or is unavailable. Please send it again.",
+        );
+      attachments.push(JSON.parse(row.data));
+    }
+    if (attachments.length > ATTACHMENT_MAX_FILES)
+      throw new Error("A conversation can include up to four files.");
     const run: Run = {
+      attachments,
       id: randomUUID(),
       title: prompt.slice(0, 70),
       userMessage: prompt,
@@ -262,6 +284,11 @@ export function createApp(directory: string, production = false) {
         : {}),
     };
     store.saveRun(userId, run);
+    for (const id of input.attachmentIds || [])
+      db.prepare("DELETE FROM attachments WHERE id=? AND user_id=?").run(
+        id,
+        userId,
+      );
     void engine
       .start(userId, run)
       .catch((error) => console.error("Run failure:", error.message));
@@ -548,6 +575,27 @@ export function createApp(directory: string, production = false) {
   });
   app.delete("/api/integrations/telegram", (_req, res) => {
     telegram.clear(userOf(res).id);
+    res.json({ ok: true });
+  });
+  app.get("/api/integrations/kite", (_req, res) =>
+    res.json(kiteStatus(db, userOf(res).id)),
+  );
+  app.put("/api/integrations/kite", (req, res) => {
+    const data = z
+      .object({
+        enabled: z.boolean(),
+        apiKey: z.string().trim().max(200).optional(),
+        accessToken: z.string().trim().max(1000).optional(),
+      })
+      .parse(req.body);
+    try {
+      res.json(saveKite(db, store, userOf(res).id, data));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  app.delete("/api/integrations/kite", (_req, res) => {
+    clearKite(db, userOf(res).id);
     res.json({ ok: true });
   });
   app.get("/api/providers", (_req, res) =>
@@ -886,7 +934,7 @@ export function createApp(directory: string, production = false) {
       final: "",
       demo: selected.every((p) => p.kind === "demo"),
       parentId: data.parentId,
-      ...((data.goalMode || config.goalMode)
+      ...(data.goalMode || config.goalMode
         ? {
             goal: {
               mode: "goal" as const,

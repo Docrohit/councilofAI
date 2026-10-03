@@ -978,14 +978,20 @@ export default function App() {
               goalMode: true,
               minGoalMinutes: goalCommand.minMinutes,
               maxMinutes: Math.max(config.maxMinutes, goalCommand.maxMinutes),
-              maxCalls: Math.max(config.maxCalls, config.members.length * 6 + 12),
+              maxCalls: Math.max(
+                config.maxCalls,
+                config.members.length * 6 + 12,
+              ),
             }
           : config,
         ...(goalCommand
           ? {
               goalMode: true,
               minGoalMinutes: goalCommand.minMinutes,
-              maxGoalMinutes: Math.max(config.maxMinutes, goalCommand.maxMinutes),
+              maxGoalMinutes: Math.max(
+                config.maxMinutes,
+                goalCommand.maxMinutes,
+              ),
             }
           : {}),
         ...(run && !active ? { parentId: run.id } : {}),
@@ -1073,9 +1079,7 @@ export default function App() {
             `${f.key} · revision ${f.revision}\n${f.claim}\nEvidence: ${f.evidence.join("; ")}`,
         )
         .join("\n\n") || "(No findings.)");
-    const url = URL.createObjectURL(
-      new Blob([text], { type: "text/plain" }),
-    );
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
     const a = document.createElement("a");
     a.href = url;
     a.download = `council-${run.id.slice(0, 8)}.txt`;
@@ -1679,7 +1683,7 @@ export default function App() {
                 </div>
               </form>
               <div className="composer-caption">
-                  <span>
+                <span>
                   Use <code>/goal 10-180m …</code> for persistent goal mode.
                 </span>
                 <span>
@@ -1897,9 +1901,16 @@ function Connections({
   const [telegram, setTelegram] = useState<any>(null);
   const [telegramToken, setTelegramToken] = useState("");
   const [telegramSaving, setTelegramSaving] = useState(false);
+  const [kite, setKite] = useState<any>(null);
+  const [kiteApiKey, setKiteApiKey] = useState("");
+  const [kiteAccessToken, setKiteAccessToken] = useState("");
+  const [kiteSaving, setKiteSaving] = useState(false);
   useEffect(() => {
     api("/integrations/telegram")
       .then(setTelegram)
+      .catch(() => {});
+    api("/integrations/kite")
+      .then(setKite)
       .catch(() => {});
   }, []);
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -2031,8 +2042,8 @@ function Connections({
           </div>
           <p className="field-help">
             Telegram messages can start Council sessions or guide a running
-            session. The bot receives only board progress and final answers.
-            Use <code>/goal 10-180m your goal</code> in Telegram for goal mode.
+            session. The bot receives only board progress and final answers. Use{" "}
+            <code>/goal 10-180m your goal</code> in Telegram for goal mode.
           </p>
           <div className="form-grid">
             <label className="full">
@@ -2098,6 +2109,106 @@ function Connections({
                 }}
               >
                 Clear token
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+      {!show && (
+        <section className="connection-form">
+          <div className="resource-heading">
+            <h3>Zerodha Kite data</h3>
+            <span>
+              {kite?.enabled
+                ? "Enabled · read-only tools"
+                : "Optional market data"}
+            </span>
+          </div>
+          <p className="field-help">
+            Adds read-only Kite tools for quotes, historical candles and option
+            chain data. Council never places, modifies or cancels orders. Paste
+            the fresh access token after your morning Kite reconnect.
+          </p>
+          <div className="form-grid">
+            <label>
+              API key
+              <input
+                type="password"
+                value={kiteApiKey}
+                autoComplete="off"
+                placeholder={
+                  kite?.hasApiKey
+                    ? "Leave blank to keep saved key"
+                    : "Kite api_key"
+                }
+                onChange={(e) => setKiteApiKey(e.target.value)}
+              />
+            </label>
+            <label>
+              Access token
+              <input
+                type="password"
+                value={kiteAccessToken}
+                autoComplete="off"
+                placeholder={
+                  kite?.hasAccessToken
+                    ? "Paste new token or leave blank"
+                    : "Today's access_token"
+                }
+                onChange={(e) => setKiteAccessToken(e.target.value)}
+              />
+            </label>
+          </div>
+          {kite?.lastError && (
+            <div className="error">Kite: {kite.lastError}</div>
+          )}
+          <div className="modal-actions">
+            <button
+              className="quiet-button bordered"
+              disabled={kiteSaving}
+              onClick={async () => {
+                setKiteSaving(true);
+                setError("");
+                try {
+                  setKite(
+                    await api("/integrations/kite", "PUT", {
+                      apiKey: kiteApiKey || undefined,
+                      accessToken: kiteAccessToken || undefined,
+                      enabled: !kite?.enabled,
+                    }),
+                  );
+                  setKiteApiKey("");
+                  setKiteAccessToken("");
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setKiteSaving(false);
+                }
+              }}
+            >
+              {kiteSaving
+                ? "Saving…"
+                : kite?.enabled
+                  ? "Disable Kite"
+                  : "Enable Kite"}
+            </button>
+            {(kite?.hasApiKey || kite?.hasAccessToken) && (
+              <button
+                className="quiet-button"
+                disabled={kiteSaving}
+                onClick={async () => {
+                  setKiteSaving(true);
+                  try {
+                    await api("/integrations/kite", "DELETE");
+                    setKite(await api("/integrations/kite"));
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setKiteSaving(false);
+                  }
+                }}
+              >
+                Clear Kite
               </button>
             )}
           </div>

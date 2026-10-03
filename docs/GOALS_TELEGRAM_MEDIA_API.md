@@ -49,6 +49,10 @@ Telegram behavior:
 - `/goal 10-180m TEXT` starts or updates a goal-mode run.
 - Ordinary messages start a normal run when no Telegram-linked run is active.
 - Ordinary messages during an active run are posted as board guidance.
+- Photos and documents sent with text or captions are downloaded into the same
+  attachment pipeline as web uploads. A caption such as `/goal 10-180m review
+this image and fix the mountain colors` starts/updates goal mode and attaches
+  the file in one Telegram message.
 - Telegram receives board progress from agents and final/status messages.
 - User-originated board posts are not echoed back to Telegram.
 
@@ -83,10 +87,33 @@ Supported image input adapters:
 - OpenAI-compatible / vLLM chat payloads
 - Ollama chat image arrays
 
-Image generation and image editing are not yet a general Council tool. A team
-can reason about image goals when a capable vision model is present, but true
-generate-review-regenerate loops require provider-specific media tools that
-return files and feed those files back into the run.
+Image generation and editing are available as agent tools when the run includes
+a direct OpenAI connection with an image-capable model/key:
+
+- `media_generate_image`
+- `media_edit_image`
+
+Generated images are saved as run attachments and sent to later provider turns
+for review. Agents are instructed to review the output against the goal and
+iterate when limits allow. If no compatible image provider is configured, agents
+must report that blocker instead of claiming pixels were changed.
+
+## Market Data And Options
+
+Council can store a read-only Zerodha Kite data connection in **Connections**.
+Paste the Kite `api_key` and the fresh daily `access_token` after reconnecting.
+Kite is exposed only through data tools:
+
+- `kite_quote`
+- `kite_historical`
+- `kite_option_chain`
+
+There are no order-placement tools. Agents must never place, modify or cancel
+trades. For stock and options goals, agents should combine user-provided data,
+read-only Kite data, attachments and web research when enabled, then publish
+evidence to the board before recommending a strategy. Fundamentals, revenue,
+ratios and news should come from user data or web research unless supplied in
+attachments; Kite itself is primarily market/quote/instrument data.
 
 ## API Surface
 
@@ -109,6 +136,8 @@ Hosted authenticated API clients can use the same primitives as the web app.
   - binary upload with `X-File-Name`
 - `GET/PUT/DELETE /api/integrations/telegram`
   - Telegram bridge status/configuration
+- `GET/PUT/DELETE /api/integrations/kite`
+  - read-only Kite market-data credential status/configuration
 
 These endpoints are a practical base for an MCP server. MCP should wrap them as
 tools such as `start_goal`, `send_board_message`, `attach_file`,
@@ -117,11 +146,11 @@ limits.
 
 ## Planned Media Loop
 
-The next implementation step is a media tool contract:
+The next implementation step is a richer media/artifact contract:
 
-1. `media_generate` and `media_edit` provider adapters.
-2. Generated-file storage with owner/run scoping.
-3. Board-visible media artifacts.
+1. Additional `media_generate` and `media_edit` provider adapters beyond OpenAI.
+2. Generated-file storage with owner/run scoping outside the run JSON.
+3. Board-visible media artifact cards and Telegram file return.
 4. Agent role presets for reviewer, prompt designer, generator and critic.
 5. Iteration policy: review output against goal, revise prompt, regenerate, and
    stop only when the goal is met or limits force a qualified answer.

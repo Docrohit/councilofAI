@@ -5,7 +5,12 @@ export interface BoardPost {
   author: string;
   content: string;
   at: string;
-  kind?: "broadcast" | "conclusion" | "user-instruction" | "tool-observation";
+  kind?:
+    | "broadcast"
+    | "conclusion"
+    | "user-instruction"
+    | "user-goal"
+    | "tool-observation";
   evidenceSummary?: string;
   replyTo?: string;
   threadId?: string;

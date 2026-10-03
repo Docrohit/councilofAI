@@ -45,6 +45,7 @@ Enter a goal to let your agents work in this directory.
 /agents 5                               Five agents, independent of model count
 /budget 40                              Maximum Council model calls
 /web on | off                           Enable/disable public web research
+/goal [MIN-MAXm] TEXT                    Set top-priority goal for this session
 /board-msg TEXT                         Post to live board; use @agentname to tag
 /broadcast TEXT                         Alias for /board-msg
 /dm AGENT TEXT                          Send a direct user message to one peer
@@ -920,6 +921,29 @@ export async function startTui(options: TuiOptions) {
       tab = 2;
       return;
     }
+    if (cmd === "goal") {
+      if (!arg) throw new Error("Use /goal [MIN-MAXm] TEXT.");
+      const match = /^(\d+)(?:-(\d+))?m\s+([\s\S]+)$/.exec(arg);
+      const minMinutes = match ? Number(match[1]) : 10;
+      const maxMinutes = match
+        ? Number(match[2] || match[1])
+        : Math.max(config?.maxMinutes || 20, 10);
+      const goal = match ? match[3].trim() : arg;
+      if (!goal) throw new Error("Use /goal [MIN-MAXm] TEXT.");
+      if (busy) {
+        const result = council.updateGoal(goal, { minMinutes, maxMinutes });
+        if (!result.ok) throw new Error(result.error || "Goal was not set.");
+        notice = "Updated the active top-priority goal.";
+        tab = 2;
+      } else {
+        if (!config) throw new Error("Configure a model first.");
+        config.goalMode = true;
+        config.minGoalMinutes = minMinutes;
+        config.maxMinutes = Math.max(config.maxMinutes, maxMinutes);
+        await run(goal);
+      }
+      return;
+    }
     if (cmd === "dm" || cmd === "chat") {
       const [to, ...rest] = words;
       const content = rest.join(" ").trim();
@@ -1142,7 +1166,7 @@ export async function startTui(options: TuiOptions) {
   }
   async function submit() {
     const value = input.trim();
-    const liveCommand = /^\/(?:board-msg|broadcast|dm|chat)\s/.test(value);
+    const liveCommand = /^\/(?:board-msg|broadcast|dm|chat|goal)\s/.test(value);
     if (busy && !liveCommand) return;
     const wasBusy = busy;
     input = "";
@@ -1194,7 +1218,7 @@ export async function startTui(options: TuiOptions) {
       pasting = false;
       const text = cleanTerminal(pasteText.replace(/\r/g, "\n"));
       pasteText = "";
-      if (busy && /^\/(?:board-msg|broadcast|dm|chat)\s/.test(text)) {
+      if (busy && /^\/(?:board-msg|broadcast|dm|chat|goal)\s/.test(text)) {
         input = (input.slice(0, cursor) + text + input.slice(cursor)).slice(
           0,
           20000,

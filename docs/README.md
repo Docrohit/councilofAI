@@ -30,6 +30,7 @@ that their infrastructure is implemented or live.
 - [Upgrading](UPGRADING.md): one-command native/self-hosted updates.
 - [Native CLI/TUI](NATIVE.md): model configuration, local projects and upgrades.
 - [RunPod models](RUNPOD_MODELS.md): self-hosted vLLM, SSH tunnel and bridge setup.
+- [Goals, Telegram, Media and API](GOALS_TELEGRAM_MEDIA_API.md): goal mode, Telegram bridge, image input and API primitives.
 - [Coding](CODING.md): native/hosted capabilities and exact limitations.
 - [Communication](COMMUNICATION.md): broadcasts, direct threads and shared conclusions.
 - [Research](RESEARCH.md): opt-in web tools and provider limitations.

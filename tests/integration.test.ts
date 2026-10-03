@@ -720,6 +720,134 @@ test("direct user message invalidates the addressed peer's stale in-flight candi
   }
 });
 
+test("live goal update is distinct from a board message and resets review work", async () => {
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      user = body.messages[1].content;
+    const text = typeof user === "string" ? user : user[0].text;
+    const board = JSON.parse(
+      text
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    const inbox = JSON.parse(text.split("YOUR INBOX:\n")[1].split("\n\n")[0]);
+    let output;
+    if (!board.candidate) {
+      await pause(120);
+      output = {
+        proposal: {
+          answer: "Goal-aware answer.",
+          rationale: "Fixture goal rationale.",
+        },
+      };
+    } else if (
+      inbox.some((m: any) =>
+        String(m.content).includes("top-priority session goal"),
+      )
+    )
+      output = {
+        review: {
+          candidateId: board.candidate.id,
+          agree: true,
+          reason: "Reviewed against the updated top-priority goal.",
+        },
+      };
+    else
+      output = {
+        review: {
+          candidateId: board.candidate.id,
+          agree: true,
+          reason: "Ordinary review.",
+        },
+      };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [
+            { delta: { content: "```council\n" + JSON.stringify(output) + "\n```" } },
+          ],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Goal User",
+        email: "goal-user@example.test",
+        password: "long-password-123",
+      });
+      const provider = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const started = await api(
+        "/runs",
+        {
+          prompt: "Initial goal",
+          config: cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 10 }),
+        },
+        auth.cookie,
+      );
+      let goal;
+      for (let i = 0; i < 20; i++) {
+        goal = await api(
+          `/runs/${started.data.id}/goal`,
+          {
+            goal: "Make the output satisfy the revised goal.",
+            minMinutes: 1,
+            maxMinutes: 2,
+          },
+          auth.cookie,
+        );
+        if (goal.status === 200) break;
+        await pause(20);
+      }
+      assert.equal(goal.status, 200);
+      const result = await done(api, auth.cookie, started.data.id);
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "goal.updated" &&
+            e.data.goal.includes("revised goal"),
+        ),
+      );
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "board.post" &&
+            e.data.post.kind === "user-goal" &&
+            e.data.post.evidenceSummary.includes("Goal mode"),
+        ),
+      );
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "candidate.review" &&
+            e.data.reason === "Reviewed against the updated top-priority goal.",
+        ),
+      );
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
+
 test("candidate reviews persist across continuation and unresolved failed-peer objections block completion", async () => {
   let allowAgreement = false,
     sawResumedObjection = false;
@@ -1227,6 +1355,62 @@ test("benchmark compares council and single-model refinement with deterministic 
     await new Promise<void>((r) => model.close(() => r()));
   }
 });
+
+test("telegram bridge token can be saved encrypted and reported without disclosure", async () =>
+  harness(async ({ api, db }: any) => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = String(input);
+      if (url.startsWith("https://api.telegram.org/"))
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: 123,
+              is_bot: true,
+              username: "council_test_bot",
+              first_name: "Council Test",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      return originalFetch(input, init);
+    }) as typeof fetch;
+    try {
+      const auth = await api("/auth/signup", {
+        email: "telegram@example.test",
+        password: "long-password-123",
+      });
+      const saved = await api(
+        "/integrations/telegram",
+        { token: "123456:secret-token", enabled: false },
+        auth.cookie,
+        "PUT",
+      );
+      assert.equal(saved.status, 200);
+      assert.equal(saved.data.enabled, false);
+      assert.equal(saved.data.hasToken, true);
+      assert.equal(saved.data.username, "council_test_bot");
+      const status = await api("/integrations/telegram", undefined, auth.cookie);
+      assert.equal(status.data.hasToken, true);
+      assert.equal(JSON.stringify(status.data).includes("secret-token"), false);
+      const userRow = db
+        .prepare("SELECT id FROM users WHERE email=?")
+        .get("telegram@example.test") as any;
+      const row = db
+        .prepare("SELECT secret FROM integrations WHERE user_id=? AND kind='telegram'")
+        .get(userRow.id) as any;
+      assert.notEqual(row.secret, "123456:secret-token");
+      await api("/integrations/telegram", undefined, auth.cookie, "DELETE");
+      assert.equal(
+        (await api("/integrations/telegram", undefined, auth.cookie)).data
+          .hasToken,
+        false,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }));
 
 test("two peers agree on a revision and broadcast it while a third sees only published contents", async () => {
   let outsiderSawPrivate = false;
@@ -2007,6 +2191,71 @@ test("every peer receives attachment text through the shared provider request", 
       assert.match(request.messages[1].content, /Attachment marker: 42/);
       assert.match(request.messages[1].content, /untrusted source material/);
     }
+  }));
+
+test("image attachments are passed as multimodal provider content", async () =>
+  harness(async ({ api, base, engine }: any) => {
+    const auth = await api("/auth/signup", {
+      email: "image-model@example.test",
+      password: "long-password-123",
+    });
+    const p = await api(
+      "/providers",
+      {
+        name: "Vision bridge",
+        kind: "vllm",
+        baseUrl: "http://127.0.0.1:8000/v1",
+        model: "vision-fixture",
+        transport: "bridge",
+      },
+      auth.cookie,
+    );
+    const requests: any[] = [];
+    engine.bridge.complete = async function* (
+      _uid: any,
+      _provider: any,
+      request: any,
+    ) {
+      requests.push(request);
+      yield {
+        text: 'Fixture answer.\n```council\n{"proposal":{"answer":"The image was reviewed.","rationale":"Vision fixture"}}\n```',
+      };
+    };
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const response = await fetch(base + "/api/attachments", {
+      method: "POST",
+      headers: {
+        cookie: auth.cookie,
+        "x-council-request": "1",
+        "x-file-name": "mountain.png",
+        "content-type": "application/octet-stream",
+      },
+      body: png,
+    });
+    const file = await response.json();
+    assert.equal(response.status, 201);
+    assert.equal(file.kind, "png");
+    assert.equal(file.mediaType, "image/png");
+    assert.match(file.dataUrl, /^data:image\/png;base64,/);
+    const run = await api(
+      "/runs",
+      {
+        prompt: "Review this image",
+        config: cfg([p.data.id], 1, { maxCalls: 4 }),
+        attachmentIds: [file.id],
+      },
+      auth.cookie,
+    );
+    assert.equal(run.status, 201);
+    await done(api, auth.cookie, run.data.id);
+    assert.ok(requests.length >= 1);
+    const content = requests[0].messages[1].content;
+    assert.ok(Array.isArray(content));
+    assert.equal(content.some((p: any) => p.type === "text"), true);
+    assert.equal(content.some((p: any) => p.type === "image_url"), true);
   }));
 
 test("greetings finish with zero peer turns or tool calls and remain visible on reload", async () =>

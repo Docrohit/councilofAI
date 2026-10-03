@@ -290,6 +290,7 @@ export class NativeCouncil {
       concurrency: 1,
       maxCalls: Math.max(24, count * 3 + 1),
       maxMinutes: 20,
+      goalMode: false,
       maxOutputTokens: 8192,
     };
     if (this.teamFile) applyTeamProfile(config, this.teamFile);
@@ -308,7 +309,7 @@ export class NativeCouncil {
       [config.members.length, 1, 32, "agents"],
       [config.maxCalls, config.members.length + 2, 256, "calls"],
       [config.concurrency, 1, 8, "concurrency"],
-      [config.maxMinutes, 1, 120, "minutes"],
+      [config.maxMinutes, 1, 180, "minutes"],
       [config.maxOutputTokens, 256, 16384, "output tokens"],
     ] as const) {
       if (!Number.isInteger(value) || value < min || value > max)
@@ -372,6 +373,17 @@ export class NativeCouncil {
       final: "",
       demo: false,
       parentId: previous?.id,
+      ...(config.goalMode
+        ? {
+            goal: {
+              mode: "goal" as const,
+              text: prompt,
+              minMinutes: config.minGoalMinutes || 10,
+              maxMinutes: config.maxMinutes,
+              updatedAt: new Date().toISOString(),
+            },
+          }
+        : {}),
       ...(resume && previous
         ? { resumeState: structuredClone(previous.sharedState) }
         : {}),
@@ -408,6 +420,17 @@ export class NativeCouncil {
         return result;
     }
     return { ok: false, error: "A council must be running to send a message." };
+  }
+  updateGoal(
+    goal: string,
+    options?: { minMinutes?: number; maxMinutes?: number },
+  ) {
+    for (const id of this.engine.active.keys()) {
+      const result = this.engine.updateGoal(this.userId, id, goal, options);
+      if (result.ok || result.error !== "This session is not currently running.")
+        return result;
+    }
+    return { ok: false, error: "A council must be running to update its goal." };
   }
   async close() {
     this.stop();

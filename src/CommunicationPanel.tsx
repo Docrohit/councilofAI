@@ -51,6 +51,8 @@ export function CommunicationPanel({
                     ? `Joint conclusion · revision ${post.revision}`
                     : post.kind === "user-instruction"
                       ? "User board instruction"
+                      : post.kind === "user-goal"
+                        ? "Top-priority goal"
                       : post.kind === "tool-observation"
                         ? "Tool observation"
                         : "Broadcast"}

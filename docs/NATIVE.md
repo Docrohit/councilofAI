@@ -75,6 +75,7 @@ Start with concurrency 1 for a small model or shared working tree.
 | `/budget 40`, `/concurrency 1`                          | Set call and concurrency limits                                |
 | `/limits 12 3`                                          | Set total agent count and spawn depth                          |
 | `/limits unlimited unlimited`                           | Let peers grow within call/time budgets                        |
+| `/goal [MIN-MAXm] TEXT`                                 | Set or update the top-priority goal for the session            |
 | `/board-msg TEXT`, `/broadcast TEXT`                    | Post live guidance to the shared board during a run            |
 | `/dm AGENT TEXT`, `/chat AGENT TEXT`                    | Send live guidance directly to one peer during a run           |
 | `/files`, `/read path`, `/search text`                  | Browse and search the current project                          |
@@ -95,6 +96,9 @@ Type `/` for a filtered command menu, or Ctrl+P for a searchable command palette
 Up/Down selects; Enter opens; Escape closes. Tab completes a slash-menu command.
 For `/dm` and `/chat`, use a peer ID such as `peer-1` or a single-token peer
 name such as `Atlas`; for names with spaces, use the peer ID.
+`/goal` is stronger than a board message: it posts a goal board item, clears
+stale endorsements and asks peers to re-review the current candidate against the
+new goal.
 
 Outside menus, Tab/Shift+Tab switches **Discussion, Engagement, Board,
 Conversations, Findings, Answer, Tools, Files and Help**. Direct commands

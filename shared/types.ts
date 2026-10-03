@@ -34,6 +34,8 @@ export interface Member {
 export interface RunConfig {
   webResearch?: boolean;
   sandbox?: boolean;
+  goalMode?: boolean;
+  minGoalMinutes?: number;
   members: Member[];
   providerIds: string[];
   maxAgents: number | null;
@@ -63,6 +65,13 @@ export interface Run {
   demo: boolean;
   verificationTools?: boolean;
   attachments?: import("./attachments").Attachment[];
+  goal?: {
+    mode: "task" | "goal";
+    text: string;
+    minMinutes: number;
+    maxMinutes: number;
+    updatedAt: string;
+  };
   parentId?: string;
   resumeState?: SharedState;
   sharedState?: SharedState;
@@ -100,8 +109,11 @@ export interface User {
 }
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ChatContentPart[];
 }
+export type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 export interface Chunk {
   type: "text" | "reasoning" | "usage" | "coding";
   text?: string;

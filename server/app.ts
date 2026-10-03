@@ -32,6 +32,7 @@ import {
   type BenchmarkResult,
 } from "./benchmarks.ts";
 import { complete } from "./providers.ts";
+import { TelegramBridge } from "./telegram.ts";
 import type { Provider, Run, User } from "../shared/types.ts";
 
 const credentials = z.object({
@@ -73,6 +74,8 @@ const member = z.object({
 const configSchema = z.object({
   sandbox: z.boolean().default(false),
   webResearch: z.boolean().default(false),
+  goalMode: z.boolean().default(false),
+  minGoalMinutes: z.number().int().min(1).max(180).optional(),
   members: z.array(member).min(1).max(32),
   providerIds: z.array(z.string().min(1).max(80)).min(1).max(20),
   maxAgents: z.number().int().min(1).max(128).nullable().default(12),
@@ -80,7 +83,7 @@ const configSchema = z.object({
   concurrency: z.number().int().min(1).max(8).default(1),
   maxCalls: z.number().int().min(4).max(256).default(24),
   maxOutputTokens: z.number().int().min(256).max(16384).default(8192),
-  maxMinutes: z.number().int().min(1).max(120).default(20),
+  maxMinutes: z.number().int().min(1).max(180).default(20),
 });
 const fileSchema = z.object({
   name: z
@@ -187,6 +190,85 @@ export function createApp(directory: string, production = false) {
     legacyHeaders: false,
   });
   const userOf = (res: Response) => res.locals.user as User;
+  const startRunForUser = async (
+    userId: string,
+    input: {
+      prompt: string;
+      config: unknown;
+      goalMode?: boolean;
+      minGoalMinutes?: number;
+      maxGoalMinutes?: number;
+    },
+  ) => {
+    const prompt = z.string().trim().min(1).max(20_000).parse(input.prompt);
+    let config = configSchema.parse(input.config);
+    if (
+      benchmarks.busy(userId) ||
+      [...engine.active.values()].some((a) => a.userId === userId)
+    )
+      throw new Error("Stop or finish your active session first.");
+    if (engine.active.size >= 10)
+      throw new Error("Server is at capacity. Please retry shortly.");
+    const providers = store.providers(userId);
+    if (
+      new Set(config.members.map((m) => m.id)).size !== config.members.length ||
+      (config.maxAgents !== null && config.maxAgents < config.members.length) ||
+      config.maxCalls < config.members.length + 2 ||
+      config.members.some((m) => !config.providerIds.includes(m.providerId)) ||
+      config.providerIds.some((id) => !providers.find((p) => p.id === id))
+    )
+      throw new Error("Invalid saved team or budget. Update your Council team.");
+    const selected = providers.filter((p) => config.providerIds.includes(p.id));
+    if (
+      selected.some((p) => p.kind === "demo") &&
+      selected.some((p) => p.kind !== "demo")
+    )
+      throw new Error("Use an entirely demo team or entirely real connections.");
+    const goalMin = Math.min(
+      Math.max(input.minGoalMinutes ?? config.minGoalMinutes ?? 10, 1),
+      180,
+    );
+    const goalMax = Math.min(
+      Math.max(input.maxGoalMinutes ?? config.maxMinutes, goalMin),
+      180,
+    );
+    if (input.goalMode || config.goalMode)
+      config = {
+        ...config,
+        goalMode: true,
+        minGoalMinutes: goalMin,
+        maxMinutes: goalMax,
+      };
+    const run: Run = {
+      id: randomUUID(),
+      title: prompt.slice(0, 70),
+      userMessage: prompt,
+      prompt,
+      config,
+      createdAt: new Date().toISOString(),
+      status: "queued",
+      final: "",
+      demo: selected.every((p) => p.kind === "demo"),
+      ...(input.goalMode || config.goalMode
+        ? {
+            goal: {
+              mode: "goal" as const,
+              text: prompt,
+              minMinutes: goalMin,
+              maxMinutes: goalMax,
+              updatedAt: new Date().toISOString(),
+            },
+          }
+        : {}),
+    };
+    store.saveRun(userId, run);
+    void engine
+      .start(userId, run)
+      .catch((error) => console.error("Run failure:", error.message));
+    return run;
+  };
+  const telegram = new TelegramBridge(db, store, engine, startRunForUser);
+  telegram.startAll();
   const issueSession = (userId: string, kind: string) => {
     const token = randomBytes(32).toString("base64url");
     db.prepare("DELETE FROM sessions WHERE expires<?").run(Date.now());
@@ -335,9 +417,10 @@ export function createApp(directory: string, production = false) {
       try {
         attachmentName(decodeURIComponent(req.get("X-File-Name") || ""));
       } catch {
-        res
-          .status(400)
-          .json({ error: "Choose a .md, .txt, .pdf, .docx or .apk file." });
+        res.status(400).json({
+          error:
+            "Choose a .md, .txt, .pdf, .docx, .apk, .png, .jpg, .jpeg or .webp file.",
+        });
         return;
       }
       if (!req.is("application/octet-stream")) {
@@ -445,6 +528,26 @@ export function createApp(directory: string, production = false) {
     db.prepare("DELETE FROM sessions WHERE user_id=? AND kind='cli'").run(
       userOf(res).id,
     );
+    res.json({ ok: true });
+  });
+  app.get("/api/integrations/telegram", (_req, res) =>
+    res.json(telegram.status(userOf(res).id)),
+  );
+  app.put("/api/integrations/telegram", async (req, res) => {
+    const data = z
+      .object({
+        token: z.string().trim().max(200).optional(),
+        enabled: z.boolean(),
+      })
+      .parse(req.body);
+    try {
+      res.json(await telegram.configure(userOf(res).id, data));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  app.delete("/api/integrations/telegram", (_req, res) => {
+    telegram.clear(userOf(res).id);
     res.json({ ok: true });
   });
   app.get("/api/providers", (_req, res) =>
@@ -674,6 +777,9 @@ export function createApp(directory: string, production = false) {
       .object({
         prompt: z.string().trim().min(1).max(20_000),
         config: configSchema,
+        goalMode: z.boolean().optional(),
+        minGoalMinutes: z.number().int().min(1).max(180).optional(),
+        maxGoalMinutes: z.number().int().min(1).max(180).optional(),
         parentId: z.string().optional(),
         attachmentIds: z
           .array(z.string().uuid())
@@ -780,6 +886,41 @@ export function createApp(directory: string, production = false) {
       final: "",
       demo: selected.every((p) => p.kind === "demo"),
       parentId: data.parentId,
+      ...((data.goalMode || config.goalMode)
+        ? {
+            goal: {
+              mode: "goal" as const,
+              text: data.prompt,
+              minMinutes: Math.min(
+                Math.max(data.minGoalMinutes ?? config.minGoalMinutes ?? 10, 1),
+                180,
+              ),
+              maxMinutes: Math.min(
+                Math.max(
+                  data.maxGoalMinutes ?? config.maxMinutes,
+                  data.minGoalMinutes ?? config.minGoalMinutes ?? 10,
+                ),
+                180,
+              ),
+              updatedAt: new Date().toISOString(),
+            },
+            config: {
+              ...config,
+              goalMode: true,
+              minGoalMinutes: Math.min(
+                Math.max(data.minGoalMinutes ?? config.minGoalMinutes ?? 10, 1),
+                180,
+              ),
+              maxMinutes: Math.min(
+                Math.max(
+                  data.maxGoalMinutes ?? config.maxMinutes,
+                  data.minGoalMinutes ?? config.minGoalMinutes ?? 10,
+                ),
+                180,
+              ),
+            },
+          }
+        : {}),
     };
     store.saveRun(userId, run);
     for (const id of data.attachmentIds)
@@ -888,6 +1029,29 @@ export function createApp(directory: string, production = false) {
       })
       .parse(req.body);
     const result = engine.sendUserMessage(userOf(res).id, run.id, to, content);
+    if (!result.ok) {
+      res.status(409).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true });
+  });
+  app.post("/api/runs/:id/goal", (req, res) => {
+    const run = store.getRun(userOf(res).id, req.params.id as string);
+    if (!run) {
+      res.sendStatus(404);
+      return;
+    }
+    const { goal, minMinutes, maxMinutes } = z
+      .object({
+        goal: z.string().trim().min(1).max(20_000),
+        minMinutes: z.number().int().min(1).max(180).optional(),
+        maxMinutes: z.number().int().min(1).max(180).optional(),
+      })
+      .parse(req.body);
+    const result = engine.updateGoal(userOf(res).id, run.id, goal, {
+      minMinutes,
+      maxMinutes,
+    });
     if (!result.ok) {
       res.status(409).json({ error: result.error });
       return;

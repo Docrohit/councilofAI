@@ -4,8 +4,16 @@ import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 import {
   ATTACHMENT_MAX_BYTES,
+  ATTACHMENT_IMAGE_MAX_BYTES,
   type Attachment,
 } from "../shared/attachments.ts";
+
+const imageTypes: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+};
 
 export function attachmentName(value: string) {
   const name = value
@@ -13,8 +21,13 @@ export function attachmentName(value: string) {
     .replace(/[/\\\u0000-\u001f\u007f]/g, "_")
     .slice(0, 180);
   const kind = name.split(".").pop()?.toLowerCase();
-  if (!name || !["md", "txt", "pdf", "docx", "apk"].includes(kind || ""))
-    throw new Error("Choose a .md, .txt, .pdf, .docx or .apk file.");
+  if (
+    !name ||
+    !["md", "txt", "pdf", "docx", "apk", "png", "jpg", "jpeg", "webp"].includes(
+      kind || "",
+    )
+  )
+    throw new Error("Choose a .md, .txt, .pdf, .docx, .apk, .png, .jpg, .jpeg or .webp file.");
   return { name, kind: kind as Attachment["kind"] };
 }
 export async function prepareAttachment(
@@ -25,6 +38,23 @@ export async function prepareAttachment(
   const { name, kind } = attachmentName(filename);
   if (!buffer.length || buffer.length > ATTACHMENT_MAX_BYTES)
     throw new Error("Files must be between 1 byte and 20 MB.");
+  if (kind in imageTypes) {
+    if (buffer.length > ATTACHMENT_IMAGE_MAX_BYTES)
+      throw new Error("Images must be 8 MB or smaller.");
+    return {
+      id: randomUUID(),
+      name,
+      kind,
+      size: buffer.length,
+      sha256: createHash("sha256").update(buffer).digest("hex"),
+      text: "",
+      warnings: [
+        "Image attached for vision-capable providers. Text-only providers can only see its name, size and hash.",
+      ],
+      mediaType: imageTypes[kind],
+      dataUrl: `data:${imageTypes[kind]};base64,${buffer.toString("base64")}`,
+    };
+  }
   const result = await new Promise<{ text: string; warnings: string[] }>(
     (resolve, reject) => {
       const child = spawn(

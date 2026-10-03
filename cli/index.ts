@@ -29,6 +29,11 @@ const { values, positionals } = parseArgs({
     "max-depth": { type: "string" },
     "max-calls": { type: "string" },
     "max-output-tokens": { type: "string" },
+    "min-goal-minutes": { type: "string" },
+    "max-goal-minutes": { type: "string" },
+    goal: { type: "boolean" },
+    enabled: { type: "string" },
+    token: { type: "string" },
     team: { type: "string" },
     version: { type: "boolean" },
     check: { type: "boolean" },
@@ -329,6 +334,9 @@ async function main() {
     console.log(
       `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n      [--max-output-tokens N] [--team FILE]\n  upgrade [--check] [--web]          Update a clean main installation; --web builds the web UI\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--web]                      Enable public web research (search fees may apply)\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-output-tokens N]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
     );
+    console.log(
+      "\nGoal and channel commands:\n  telegram status|set|clear         Manage Telegram bot bridge\n  run \"goal\" --providers ID --goal  Start goal mode\n      [--min-goal-minutes 10] [--max-goal-minutes 180]",
+    );
     return;
   }
   if (command === "upgrade") {
@@ -538,6 +546,37 @@ async function main() {
       console.log(`${p.id}  ${p.name}  ${p.model}  ${p.transport}`);
     return;
   }
+  if (command === "telegram") {
+    const action = positionals[1] || "status";
+    if (action === "status") {
+      console.log(JSON.stringify(await api("/integrations/telegram"), null, 2));
+      return;
+    }
+    if (action === "set") {
+      const botToken =
+        positionals[2] || process.env.TELEGRAM_BOT_TOKEN || values.token;
+      if (!botToken)
+        throw new Error(
+          "Use telegram set BOT_TOKEN or set TELEGRAM_BOT_TOKEN.",
+        );
+      const result = await api("/integrations/telegram", "PUT", {
+        token: botToken,
+        enabled: values.enabled !== "false",
+      });
+      console.log(
+        `Telegram ${result.enabled ? "enabled" : "saved"} for ${result.username || result.firstName || "bot"}.`,
+      );
+      return;
+    }
+    if (action === "clear") {
+      await api("/integrations/telegram", "DELETE");
+      console.log("Telegram bridge cleared.");
+      return;
+    }
+    throw new Error(
+      "Use telegram status, telegram set BOT_TOKEN, or telegram clear.",
+    );
+  }
   if (command === "run") {
     const prompt = positionals.slice(1).join(" ");
     if (!prompt || !values.providers)
@@ -580,12 +619,32 @@ async function main() {
       maxOutputTokens,
       concurrency: Number(values.concurrency || 1),
       maxMinutes: 20,
+      goalMode: !!values.goal,
+      minGoalMinutes: values["min-goal-minutes"]
+        ? Number(values["min-goal-minutes"])
+        : values.goal
+          ? 10
+          : undefined,
     };
+    if (values.goal) {
+      config.maxMinutes = Number(values["max-goal-minutes"] || 180);
+      config.maxCalls = Math.max(config.maxCalls, count * 6 + 12);
+    }
     if (values.team) {
       const { applyTeamProfile } = await import("./native.ts");
       applyTeamProfile(config, values.team);
     }
-    const run = await api("/runs", "POST", { prompt, config });
+    const run = await api("/runs", "POST", {
+      prompt,
+      config,
+      ...(values.goal
+        ? {
+            goalMode: true,
+            minGoalMinutes: config.minGoalMinutes,
+            maxGoalMinutes: config.maxMinutes,
+          }
+        : {}),
+    });
     console.log(`Session: ${run.id}\nWeb: ${base}`);
     await watch(run.id);
     return;

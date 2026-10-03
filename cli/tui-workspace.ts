@@ -22,6 +22,7 @@ export const commands = [
     .map((x) => [x.toLowerCase(), `Open ${x}`]),
   ["files", "Browse project files"],
   ["web", "Toggle public web research"],
+  ["goal", "Set or update the top-priority goal"],
   ["board-msg", "Post a user message to the live board"],
   ["broadcast", "Post a user message to the live board"],
   ["dm", "Send a direct message to a peer"],

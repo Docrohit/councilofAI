@@ -11,8 +11,10 @@ Council is a personal, self-hostable multi-LLM orchestration project with a mobi
 Read the [full architecture](docs/ARCHITECTURE.md) for execution modes, peer
 collaboration, tools, storage, security, deployment and the planned LSP/MCP/skills
 integrations. [Web research](docs/RESEARCH.md) is available as an opt-in feature;
-Native LSP and project Skills loading are included in the current candidate source;
-MCP and hosted LSP/Skills remain planned. See [setup](docs/LSP_SKILLS.md).
+Native LSP and project Skills loading are included in the current candidate source.
+Goal mode, Telegram bridge setup, image input status and API primitives are in
+[Goals, Telegram, Media and API](docs/GOALS_TELEGRAM_MEDIA_API.md). MCP and
+hosted LSP/Skills remain planned. See [setup](docs/LSP_SKILLS.md).
 
 For development and planning, start with the [documentation index](docs/README.md)
 and [Council task prompts](PROMPTS/README.md). The business and release plans
@@ -165,9 +167,13 @@ The worker makes outbound authenticated requests and forwards streamed output. O
 ```sh
 npm run cli -- login --server http://localhost:4310
 npm run cli -- connections
+npm run cli -- telegram set "$TELEGRAM_BOT_TOKEN"
 
 # One model, five independent agents, serial local inference
 npm run cli -- run "Investigate this problem" --providers LOCAL_ID --agents 5 --concurrency 1
+
+# Goal mode, with a minimum effort window
+npm run cli -- run "Make the attached draft publishable" --providers LOCAL_ID --goal --min-goal-minutes 10 --max-goal-minutes 180
 
 # Three models, ten agents, unrestricted delegation within a call budget
 npm run cli -- run "Solve this task" --providers ID1,ID2,ID3 --agents 10 --max-agents unlimited --max-depth unlimited --max-calls 80 --concurrency 3

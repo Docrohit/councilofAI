@@ -1,4 +1,9 @@
-import type { ChatMessage, Chunk, Provider } from "../shared/types.ts";
+import type {
+  ChatContentPart,
+  ChatMessage,
+  Chunk,
+  Provider,
+} from "../shared/types.ts";
 import { validateEndpoint } from "./security.ts";
 
 export async function* lines(
@@ -69,6 +74,70 @@ export interface CompletionRequest {
   signal: AbortSignal;
   context?: { runId: string; agentId: string };
 }
+
+const contentText = (content: ChatMessage["content"]) =>
+  typeof content === "string"
+    ? content
+    : content
+        .filter((p) => p.type === "text")
+        .map((p) => p.text)
+        .join("\n");
+
+const openAiContent = (content: ChatMessage["content"]) =>
+  typeof content === "string"
+    ? content
+    : content.map((part) =>
+        part.type === "text"
+          ? { type: "text", text: part.text }
+          : { type: "image_url", image_url: part.image_url },
+      );
+
+const responsesContent = (content: ChatMessage["content"]) =>
+  typeof content === "string"
+    ? content
+    : content.map((part) =>
+        part.type === "text"
+          ? { type: "input_text", text: part.text }
+          : { type: "input_image", image_url: part.image_url.url },
+      );
+
+function dataImage(part: Extract<ChatContentPart, { type: "image_url" }>) {
+  const match = /^data:([^;,]+);base64,(.+)$/i.exec(part.image_url.url);
+  if (!match) throw new Error("Image attachments must use data URLs.");
+  return { mediaType: match[1], data: match[2] };
+}
+
+const anthropicContent = (content: ChatMessage["content"]) =>
+  typeof content === "string"
+    ? content
+    : content.map((part) => {
+        if (part.type === "text") return { type: "text", text: part.text };
+        const image = dataImage(part);
+        return {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: image.mediaType,
+            data: image.data,
+          },
+        };
+      });
+
+const ollamaMessages = (messages: ChatMessage[]) =>
+  messages.map((message) => {
+    if (typeof message.content === "string") return message;
+    const images = message.content.filter(
+      (
+        part,
+      ): part is Extract<ChatContentPart, { type: "image_url" }> =>
+        part.type === "image_url",
+    );
+    return {
+      ...message,
+      content: contentText(message.content),
+      images: images.map((p) => dataImage(p).data),
+    };
+  });
 
 // Provider errors are returned only to the owning account. Keep useful diagnostics,
 // but never echo a key even when a provider includes one in its error message.
@@ -145,16 +214,20 @@ export async function* complete(
   const base = validateEndpoint(provider.baseUrl);
   const system = request.messages
     .filter((m) => m.role === "system")
-    .map((m) => m.content)
+    .map((m) => contentText(m.content))
     .join("\n");
   const messages = request.messages.filter((m) => m.role !== "system");
+  const chatMessages = request.messages.map((m) => ({
+    ...m,
+    content: openAiContent(m.content),
+  }));
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   let suffix = "/chat/completions";
   let body: any = {
     model: provider.model,
-    messages: request.messages,
+    messages: chatMessages,
     stream: true,
     max_tokens: request.maxTokens,
   };
@@ -163,7 +236,7 @@ export async function* complete(
     suffix = "/api/chat";
     body = {
       model: provider.model,
-      messages: request.messages,
+      messages: ollamaMessages(request.messages),
       stream: true,
       ...(provider.reasoning ? { think: true } : {}),
       options: { num_predict: request.maxTokens },
@@ -174,7 +247,10 @@ export async function* complete(
     body = {
       model: provider.model,
       instructions: system,
-      input: messages,
+      input: messages.map((m) => ({
+        ...m,
+        content: responsesContent(m.content),
+      })),
       stream: true,
       store: false,
       max_output_tokens: request.maxTokens,
@@ -189,7 +265,10 @@ export async function* complete(
     body = {
       model: provider.model,
       system,
-      messages,
+      messages: messages.map((m) => ({
+        ...m,
+        content: anthropicContent(m.content),
+      })),
       stream: true,
       max_tokens: request.maxTokens,
       ...(provider.reasoning ? { thinking: { type: "adaptive" } } : {}),
@@ -294,8 +373,8 @@ export async function* complete(
 }
 
 async function* demo(request: CompletionRequest): AsyncGenerator<Chunk> {
-  const system = request.messages[0].content;
-  const user = request.messages.at(-1)!.content;
+  const system = contentText(request.messages[0].content);
+  const user = contentText(request.messages.at(-1)!.content);
   const turn = Number(/TURN: (\d+)/.exec(system)?.[1] || 1);
   const depth = Number(/DEPTH: (\d+)/.exec(system)?.[1] || 0);
   const name = /NAME: ([^\n]+)/.exec(system)?.[1] || "Peer";

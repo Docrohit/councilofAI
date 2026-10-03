@@ -16,6 +16,8 @@ export function openDb(directory: string) {
     CREATE INDEX IF NOT EXISTS run_owner ON runs(user_id);
     CREATE TABLE IF NOT EXISTS benchmarks(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS preferences(user_id TEXT PRIMARY KEY REFERENCES users(id), config TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS integrations(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, config TEXT NOT NULL, secret TEXT NOT NULL DEFAULT '');
+    CREATE UNIQUE INDEX IF NOT EXISTS integration_owner_kind ON integrations(user_id,kind);
     CREATE TABLE IF NOT EXISTS files(user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, content TEXT NOT NULL, PRIMARY KEY(user_id,name));
     CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), run_id TEXT NOT NULL REFERENCES runs(id), name TEXT NOT NULL, content TEXT NOT NULL, original TEXT, status TEXT NOT NULL DEFAULT 'pending');`);
   return db;

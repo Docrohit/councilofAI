@@ -77,6 +77,8 @@ const defaults = (providers: Provider[]): RunConfig => ({
   maxCalls: 24,
   maxOutputTokens: 8192,
   maxMinutes: 20,
+  goalMode: false,
+  minGoalMinutes: 10,
 });
 const busy = (run?: Run | null) =>
   !!run && ["queued", "running"].includes(run.status);
@@ -952,15 +954,40 @@ export default function App() {
   const demo = config.providerIds.every(
     (id) => providers.find((p) => p.id === id)?.kind === "demo",
   );
+  function parseGoalCommand(value: string) {
+    const match = /^\/goal(?:\s+(\d+)(?:-(\d+))?m)?\s+([\s\S]+)$/i.exec(
+      value.trim(),
+    );
+    if (!match) return null;
+    const minMinutes = match[1] ? Number(match[1]) : 10;
+    const maxMinutes = match[2] ? Number(match[2]) : Math.max(minMinutes, 20);
+    return { goal: match[3].trim(), minMinutes, maxMinutes };
+  }
   async function start(goal = prompt) {
     if (!goal.trim() || uploading || sending || active) return;
     setError("");
     setSending(true);
+    const goalCommand = parseGoalCommand(goal);
     try {
       const next = await api<Run>("/runs", "POST", {
-        prompt: goal,
+        prompt: goalCommand?.goal || goal,
         attachmentIds: attachments.map((a) => a.id),
-        config,
+        config: goalCommand
+          ? {
+              ...config,
+              goalMode: true,
+              minGoalMinutes: goalCommand.minMinutes,
+              maxMinutes: Math.max(config.maxMinutes, goalCommand.maxMinutes),
+              maxCalls: Math.max(config.maxCalls, config.members.length * 6 + 12),
+            }
+          : config,
+        ...(goalCommand
+          ? {
+              goalMode: true,
+              minGoalMinutes: goalCommand.minMinutes,
+              maxGoalMinutes: Math.max(config.maxMinutes, goalCommand.maxMinutes),
+            }
+          : {}),
         ...(run && !active ? { parentId: run.id } : {}),
       });
       runRef.current = next.id;
@@ -1061,6 +1088,25 @@ export default function App() {
     setError("");
     try {
       await api(`/runs/${run.id}/board`, "POST", { content: boardDraft });
+      setBoardDraft("");
+      setTab("board");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBoardPosting(false);
+    }
+  }
+  async function postGoal() {
+    if (!run || !active || !boardDraft.trim() || boardPosting) return;
+    const goalCommand = parseGoalCommand(`/goal ${boardDraft}`)!;
+    setBoardPosting(true);
+    setError("");
+    try {
+      await api(`/runs/${run.id}/goal`, "POST", {
+        goal: goalCommand.goal,
+        minMinutes: goalCommand.minMinutes,
+        maxMinutes: Math.max(config.maxMinutes, goalCommand.maxMinutes),
+      });
       setBoardDraft("");
       setTab("board");
     } catch (e) {
@@ -1538,6 +1584,14 @@ export default function App() {
                   >
                     {boardPosting ? "Posting…" : "Post to board"}
                   </button>
+                  <button
+                    type="button"
+                    className="quiet-button bordered"
+                    disabled={!boardDraft.trim() || boardPosting}
+                    onClick={postGoal}
+                  >
+                    Set goal
+                  </button>
                 </form>
               )}
               <form
@@ -1625,8 +1679,8 @@ export default function App() {
                 </div>
               </form>
               <div className="composer-caption">
-                <span>
-                  Peers choose their roles. Evidence guides the answer.
+                  <span>
+                  Use <code>/goal 10-180m …</code> for persistent goal mode.
                 </span>
                 <span>
                   Enter to send <kbd>↵</kbd>
@@ -1840,6 +1894,14 @@ function Connections({
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [testId, setTestId] = useState("");
+  const [telegram, setTelegram] = useState<any>(null);
+  const [telegramToken, setTelegramToken] = useState("");
+  const [telegramSaving, setTelegramSaving] = useState(false);
+  useEffect(() => {
+    api("/integrations/telegram")
+      .then(setTelegram)
+      .catch(() => {});
+  }, []);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
@@ -1956,6 +2018,90 @@ function Connections({
         <div role="alert" className="error">
           {error}
         </div>
+      )}
+      {!show && (
+        <section className="connection-form">
+          <div className="resource-heading">
+            <h3>Telegram bridge</h3>
+            <span>
+              {telegram?.enabled
+                ? `Enabled${telegram.username ? ` · @${telegram.username}` : ""}`
+                : "Optional input channel"}
+            </span>
+          </div>
+          <p className="field-help">
+            Telegram messages can start Council sessions or guide a running
+            session. The bot receives only board progress and final answers.
+            Use <code>/goal 10-180m your goal</code> in Telegram for goal mode.
+          </p>
+          <div className="form-grid">
+            <label className="full">
+              Bot token
+              <input
+                type="password"
+                value={telegramToken}
+                autoComplete="off"
+                placeholder={
+                  telegram?.hasToken
+                    ? "Leave blank to keep saved token"
+                    : "123456:ABC..."
+                }
+                onChange={(e) => setTelegramToken(e.target.value)}
+              />
+            </label>
+          </div>
+          {telegram?.lastError && (
+            <div className="error">Telegram: {telegram.lastError}</div>
+          )}
+          <div className="modal-actions">
+            <button
+              className="quiet-button bordered"
+              disabled={telegramSaving}
+              onClick={async () => {
+                setTelegramSaving(true);
+                setError("");
+                try {
+                  setTelegram(
+                    await api("/integrations/telegram", "PUT", {
+                      token: telegramToken || undefined,
+                      enabled: !telegram?.enabled,
+                    }),
+                  );
+                  setTelegramToken("");
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setTelegramSaving(false);
+                }
+              }}
+            >
+              {telegramSaving
+                ? "Saving…"
+                : telegram?.enabled
+                  ? "Disable Telegram"
+                  : "Enable Telegram"}
+            </button>
+            {telegram?.hasToken && (
+              <button
+                className="quiet-button"
+                disabled={telegramSaving}
+                onClick={async () => {
+                  setTelegramSaving(true);
+                  try {
+                    await api("/integrations/telegram", "DELETE");
+                    setTelegram(await api("/integrations/telegram"));
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setTelegramSaving(false);
+                  }
+                }}
+              >
+                Clear token
+              </button>
+            )}
+          </div>
+        </section>
       )}
       {show ? (
         <form

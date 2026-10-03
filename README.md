@@ -110,7 +110,7 @@ Evidence in the ledger is an **agent claim**, not automatically proven truth. De
 
 Peers can assess one another in specific domains using established shared findings as evidence. Self-ratings do not affect the summaries, and assessments stop contributing when their evidence is disputed or revised. These are task-specific peer assessments, not independent proof of expertise. Agents can use them to change assignments and reporting relationships as work progresses.
 
-If a provider fails, Council can move the same agent identity to another selected model while retaining its task, partial public contribution, inbox, and shared findings. State is checkpointed for continuation after interruption. Recovery requires another available model or a later restart. Known gaps remain: an unavailable peer's negative final-candidate review can cease blocking completion, and continuation does not restore the active candidate/reviews. See [known issues](docs/KNOWN_ISSUES.md).
+If a provider fails, Council can move the same agent identity to another selected model while retaining its task, partial public contribution, inbox, and shared findings. State is checkpointed for continuation after interruption. Recovery requires another available model or a later restart. Candidate answers and reviews are checkpointed in the current source, and unavailable peers' negative reviews remain unresolved objections rather than disappearing from completion logic. See [known issues](docs/KNOWN_ISSUES.md).
 
 ## Benchmarks
 
@@ -137,6 +137,10 @@ The importer pins the upstream revision, records the sample seed, saves the lice
 | Other compatible endpoint | Your configured base URL       | OpenAI chat-completions streaming contract                     |
 
 Use model IDs available to **your** account or local runtime. Council does not silently choose a model or download weights. “Test” makes a small real model call and may incur usage. Reasoning is opt-in because support and parameter semantics differ by model. Native model tool-calling is not required: Council uses a validated streaming text action protocol, making small-model instruction following an important live acceptance test.
+
+For self-hosted RunPod/vLLM models, use a direct pod-local URL when Council runs
+inside RunPod, a Mac SSH tunnel for local desktop use, or bridge mode for hosted
+Council. See [RunPod models](docs/RUNPOD_MODELS.md).
 
 A direct `localhost` URL points to the **Council server machine**. For an Ollama/vLLM model on a visitor’s computer, use a local bridge.
 

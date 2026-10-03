@@ -46,6 +46,9 @@ Enter a goal to let your agents work in this directory.
 /budget 40                              Maximum Council model calls
 /web on | off                           Enable/disable public web research
 /board-msg TEXT                         Post to live board; use @agentname to tag
+/broadcast TEXT                         Alias for /board-msg
+/dm AGENT TEXT                          Send a direct user message to one peer
+/chat AGENT TEXT                        Alias for /dm
 /skills [OFFSET]                       List project Skills
 /skill NAME [RESOURCE|-] [OFFSET]       Read paged skill instructions or resources
 /lsp status                            Show configured language servers
@@ -298,7 +301,7 @@ export async function startTui(options: TuiOptions) {
     const visible = lines.slice(bottom, bottom + area);
     const menu = suggestions();
     const composeTitle = busy
-      ? "Working · /board-msg @agent to guide live work"
+      ? "Working · /board-msg or /dm agent to guide live work"
       : "Ask Council";
     const topBorder = `┌─ ${composeTitle} `;
     const bottomLabel = `${config?.members.length || 0} agents · ${config?.providerIds.join(" + ") || "/connections to add models"}`;
@@ -325,7 +328,7 @@ export async function startTui(options: TuiOptions) {
               : i
                 ? ""
                 : busy
-                  ? "Type /board-msg @agent message to guide live work"
+                  ? "Type /board-msg @agent message or /dm Atlas message"
                   : "Ask anything… Type / for commands";
     if (menu.length) {
       menuIndex = Math.min(menuIndex, menu.length - 1);
@@ -413,7 +416,7 @@ export async function startTui(options: TuiOptions) {
       ),
       row(
         busy
-          ? " /board-msg sends live guidance · Esc/Ctrl+C stop · Tab views"
+          ? " /board-msg broadcasts · /dm agent messages · Esc/Ctrl+C stop · Tab views"
           : " Enter send · Ctrl+J newline · Ctrl+P commands · Tab views · /quit",
       ),
     ];
@@ -909,12 +912,22 @@ export async function startTui(options: TuiOptions) {
       notice = `Web research ${config.webResearch ? "enabled; search may incur OpenAI search fees" : "disabled"}. Applies to subsequent goals.`;
       return;
     }
-    if (cmd === "board-msg") {
+    if (cmd === "board-msg" || cmd === "broadcast") {
       if (!arg) throw new Error("Use /board-msg TEXT.");
       if (!council.postBoard(arg))
         throw new Error("A council must be running to post to the board.");
       notice = "Posted to the live board; peers will read it on their next turn.";
       tab = 2;
+      return;
+    }
+    if (cmd === "dm" || cmd === "chat") {
+      const [to, ...rest] = words;
+      const content = rest.join(" ").trim();
+      if (!to || !content) throw new Error(`Use /${cmd} AGENT MESSAGE.`);
+      const result = council.sendUserMessage(to, content);
+      if (!result.ok) throw new Error(result.error || "Message was not sent.");
+      notice = `Queued direct message to ${to}.`;
+      tab = 1;
       return;
     }
     if (cmd === "budget" || cmd === "concurrency") {
@@ -1129,7 +1142,8 @@ export async function startTui(options: TuiOptions) {
   }
   async function submit() {
     const value = input.trim();
-    if (busy && !value.startsWith("/board-msg ")) return;
+    const liveCommand = /^\/(?:board-msg|broadcast|dm|chat)\s/.test(value);
+    if (busy && !liveCommand) return;
     const wasBusy = busy;
     input = "";
     cursor = 0;
@@ -1180,7 +1194,7 @@ export async function startTui(options: TuiOptions) {
       pasting = false;
       const text = cleanTerminal(pasteText.replace(/\r/g, "\n"));
       pasteText = "";
-      if (busy && text.startsWith("/board-msg ")) {
+      if (busy && /^\/(?:board-msg|broadcast|dm|chat)\s/.test(text)) {
         input = (input.slice(0, cursor) + text + input.slice(cursor)).slice(
           0,
           20000,

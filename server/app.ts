@@ -875,6 +875,25 @@ export function createApp(directory: string, production = false) {
     }
     res.json({ ok: true });
   });
+  app.post("/api/runs/:id/message", (req, res) => {
+    const run = store.getRun(userOf(res).id, req.params.id as string);
+    if (!run) {
+      res.sendStatus(404);
+      return;
+    }
+    const { to, content } = z
+      .object({
+        to: z.string().trim().min(1).max(80),
+        content: z.string().trim().min(1).max(4000),
+      })
+      .parse(req.body);
+    const result = engine.sendUserMessage(userOf(res).id, run.id, to, content);
+    if (!result.ok) {
+      res.status(409).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true });
+  });
   app.get("/api/runs/:id/events", (req, res) => {
     const run = store.getRun(userOf(res).id, req.params.id as string);
     if (!run) {

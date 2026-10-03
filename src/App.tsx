@@ -1880,6 +1880,11 @@ function Connections({
         Mix local models and cloud APIs. Keys are encrypted on the server and
         never returned to your browser.
       </p>
+      <p className="modal-intro">
+        For RunPod vLLM from this desktop, open an SSH tunnel and add a vLLM
+        connection at <code>http://127.0.0.1:18100/v1</code> with the exact
+        served model ID, for example <code>qwen38-heretic</code>.
+      </p>
       <div className="connection-list">
         {providers.map((p) => (
           <div className="connection-item" key={p.id}>

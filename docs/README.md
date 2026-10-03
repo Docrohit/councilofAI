@@ -2,8 +2,9 @@
 
 Documentation draft assembled 2026-09-23 from source and the owner's interview.
 Initial implementation baseline: `ef0a1da`, v0.2.5. Feature guides and architecture
-now describe the v0.2.6 candidate source; its deployment is a separate release gate. Planned business and release
-policies do not imply that their infrastructure is implemented or live.
+now describe the current candidate source; deployment remains a separate
+release verification step. Planned business and release policies do not imply
+that their infrastructure is implemented or live.
 
 ## Start here
 
@@ -28,6 +29,7 @@ policies do not imply that their infrastructure is implemented or live.
 - [LSP and Skills](LSP_SKILLS.md): native configuration, tools and limitations.
 - [Upgrading](UPGRADING.md): one-command native/self-hosted updates.
 - [Native CLI/TUI](NATIVE.md): model configuration, local projects and upgrades.
+- [RunPod models](RUNPOD_MODELS.md): self-hosted vLLM, SSH tunnel and bridge setup.
 - [Coding](CODING.md): native/hosted capabilities and exact limitations.
 - [Communication](COMMUNICATION.md): broadcasts, direct threads and shared conclusions.
 - [Research](RESEARCH.md): opt-in web tools and provider limitations.
@@ -46,7 +48,6 @@ product requirements are recorded in the root context files and interview log.
 Mark proposed designs and unresolved choices explicitly, and update guides when
 features land. Do not silently turn an aspiration into a capability claim.
 
-No new deployment, paid model benchmark, payment integration or runtime fix was
-performed to create this documentation. The prior deferred board plan remains
-in the architecture roadmap. Final draft review and the outstanding business
-decisions can be completed without implementing them first.
+Do not infer production state from documentation alone. Paid model benchmarks,
+payment integration and the private staging/promotion path still require their
+own implementation and verification.

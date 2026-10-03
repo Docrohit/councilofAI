@@ -431,6 +431,15 @@ test("user can post a live board message that is queued for peers", async () => 
         await pause(20);
       }
       assert.equal(posted.status, 200);
+      const direct = await api(
+        `/runs/${started.data.id}/message`,
+        {
+          to: "Peer 4",
+          content: "Directly inspect the new direction before endorsing.",
+        },
+        auth.cookie,
+      );
+      assert.equal(direct.status, 200);
       const result = await done(api, auth.cookie, started.data.id);
       assert(
         result.events.some(
@@ -450,6 +459,16 @@ test("user can post a live board message that is queued for peers", async () => 
             e.data.tagged.includes("peer-1") &&
             e.data.tagged.includes("peer-2") &&
             e.data.delivery.includes("next model turn"),
+        ),
+      );
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "agent.message" &&
+            e.data.from === "user" &&
+            e.data.to === "peer-1" &&
+            e.data.kind === "direct" &&
+            e.data.content.includes("Directly inspect"),
         ),
       );
     });
@@ -563,6 +582,335 @@ test("live board message invalidates stale in-flight candidate reviews", async (
             e.type === "candidate.review" &&
             e.data.reason === "Fresh review after reading the user board message.",
         ),
+      );
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
+
+test("direct user message invalidates the addressed peer's stale in-flight candidate review", async () => {
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      system = body.messages[0].content,
+      user = body.messages[1].content;
+    const peer = system.includes("NAME: Atlas") ? "peer-1" : "peer-2";
+    const board = JSON.parse(
+      user
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    const inbox = JSON.parse(user.split("YOUR INBOX:\n")[1].split("\n\n")[0]);
+    const fresh = inbox.some((m: any) =>
+      String(m.content).includes("Candidate proposal/review was ignored"),
+    );
+    const direct = inbox.some((m: any) =>
+      String(m.content).includes("Directly verify the revised evidence"),
+    );
+    let output;
+    if (!board.candidate && peer === "peer-1")
+      output = {
+        proposal: {
+          answer: "Initial answer before direct user guidance.",
+          rationale: "Initial fixture candidate.",
+        },
+      };
+    else if (board.candidate && peer === "peer-2") {
+      await pause(fresh ? 0 : 180);
+      output = {
+        review: {
+          candidateId: board.candidate.id,
+          agree: true,
+          reason:
+            fresh && direct
+              ? "Fresh review after reading the direct user message."
+              : "Stale review from before the direct user message.",
+        },
+      };
+    } else output = { broadcasts: [{ content: "Waiting for peer-2 review." }] };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [
+            { delta: { content: "```council\n" + JSON.stringify(output) + "\n```" } },
+          ],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Stale Direct",
+        email: "stale-direct@example.test",
+        password: "long-password-123",
+      });
+      const provider = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const started = await api(
+        "/runs",
+        {
+          prompt: "Reject stale candidate reviews after direct user guidance",
+          config: cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 10 }),
+        },
+        auth.cookie,
+      );
+      for (let i = 0; i < 50; i++) {
+        const snapshot = await api("/runs/" + started.data.id, undefined, auth.cookie);
+        if (
+          snapshot.data.events.some((e: any) => e.type === "candidate.proposed")
+        )
+          break;
+        await pause(20);
+      }
+      const direct = await api(
+        `/runs/${started.data.id}/message`,
+        {
+          to: "Sage",
+          content: "Directly verify the revised evidence before endorsing.",
+        },
+        auth.cookie,
+      );
+      assert.equal(direct.status, 200);
+      const result = await done(api, auth.cookie, started.data.id);
+      assert.equal(result.run.status, "completed");
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "warning" &&
+            String(e.data.message).includes("Candidate proposal/review was ignored"),
+        ),
+      );
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "candidate.review" &&
+            e.data.agentId === "peer-2" &&
+            e.data.reason === "Fresh review after reading the direct user message.",
+        ),
+      );
+      assert(
+        !result.events.some(
+          (e: any) =>
+            e.type === "candidate.review" &&
+            e.data.reason === "Stale review from before the direct user message.",
+        ),
+      );
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
+
+test("candidate reviews persist across continuation and unresolved failed-peer objections block completion", async () => {
+  let allowAgreement = false,
+    sawResumedObjection = false;
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      system = body.messages[0].content,
+      user = body.messages[1].content;
+    const peer = system.includes("NAME: Atlas") ? "peer-1" : "peer-2";
+    const board = JSON.parse(
+      user
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    if (board.candidate?.reviews?.["peer-2"]?.agree === false)
+      sawResumedObjection = true;
+    let actions: any = {};
+    if (!board.candidate && peer === "peer-1")
+      actions = {
+        proposal: {
+          answer: "Candidate answer with disputed evidence.",
+          rationale: "Initial fixture rationale.",
+        },
+      };
+    else if (board.candidate && peer === "peer-2")
+      actions = {
+        review: {
+          candidateId: board.candidate.id,
+          agree: allowAgreement,
+          reason: allowAgreement
+            ? "The preserved objection was reconsidered."
+            : "This candidate still lacks the required evidence.",
+        },
+      };
+    else if (board.candidate && peer === "peer-1")
+      actions = {
+        review: {
+          candidateId: board.candidate.id,
+          agree: true,
+          reason: "Author still supports this candidate.",
+        },
+      };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [
+            { delta: { content: "```council\n" + JSON.stringify(actions) + "\n```" } },
+          ],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Resume Candidate",
+        email: "resume-candidate@example.test",
+        password: "long-password-123",
+      });
+      const provider = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const started = await api(
+        "/runs",
+        {
+          prompt: "Preserve candidate reviews",
+          config: cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 4 }),
+        },
+        auth.cookie,
+      );
+      const first = await done(api, auth.cookie, started.data.id);
+      assert.equal(first.run.status, "needs_review");
+      assert.equal(first.run.sharedState.candidate.reviews["peer-2"].agree, false);
+      allowAgreement = true;
+      const continued = await api(
+        `/runs/${started.data.id}/continue`,
+        {},
+        auth.cookie,
+      );
+      assert.equal(continued.status, 201, JSON.stringify(continued.data));
+      const resumed = await done(api, auth.cookie, continued.data.id);
+      assert.equal(sawResumedObjection, true);
+      assert.equal(resumed.run.status, "completed");
+    });
+  } finally {
+    model.closeAllConnections();
+    await new Promise<void>((r) => model.close(() => r()));
+  }
+});
+test("an unavailable peer's negative candidate review remains an unresolved objection", async () => {
+  const model = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw),
+      system = body.messages[0].content,
+      user = body.messages[1].content;
+    const peer = system.includes("NAME: Atlas") ? "peer-1" : "peer-2";
+    const board = JSON.parse(
+      user
+        .split("LIVE SHARED BOARD (findings may be truncated):\n")[1]
+        .split("\n\n")[0],
+    );
+    if (peer === "peer-2" && board.candidate?.reviews?.["peer-2"]) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "fixture provider unavailable" }));
+      return;
+    }
+    const actions =
+      !board.candidate && peer === "peer-1"
+        ? {
+            proposal: {
+              answer: "Answer disputed by Sage.",
+              rationale: "Atlas evidence.",
+            },
+          }
+        : board.candidate && peer === "peer-2"
+          ? {
+              review: {
+                candidateId: board.candidate.id,
+                agree: false,
+                reason: "Sage objection must survive provider loss.",
+              },
+            }
+          : {};
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          choices: [
+            { delta: { content: "```council\n" + JSON.stringify(actions) + "\n```" } },
+          ],
+        }) +
+        "\n\ndata: " +
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => model.listen(0, "127.0.0.1", r));
+  try {
+    await harness(async ({ api }: any) => {
+      const auth = await api("/auth/signup", {
+        name: "Unavailable Objection",
+        email: "unavailable-objection@example.test",
+        password: "long-password-123",
+      });
+      const provider = await api(
+        "/providers",
+        {
+          name: "Fixture",
+          kind: "vllm",
+          baseUrl: `http://127.0.0.1:${(model.address() as any).port}`,
+          model: "fixture",
+          transport: "direct",
+          reasoning: false,
+        },
+        auth.cookie,
+      );
+      const started = await api(
+        "/runs",
+        {
+          prompt: "Do not drop failed peer objections",
+          config: cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 6 }),
+        },
+        auth.cookie,
+      );
+      const result = await done(api, auth.cookie, started.data.id);
+      assert.equal(result.run.status, "needs_review");
+      assert.match(result.run.final, /Sage objection must survive provider loss/);
+      assert(
+        result.events.some(
+          (e: any) =>
+            e.type === "agent.unavailable" && e.data.agentId === "peer-2",
+        ),
+      );
+      assert.equal(
+        result.events.find((e: any) => e.type === "run.final")?.data.agreement,
+        "unresolved",
       );
     });
   } finally {

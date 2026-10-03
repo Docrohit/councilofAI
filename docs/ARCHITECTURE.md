@@ -140,7 +140,7 @@ TypeScript through `tsx`. There is no external message broker or vector database
 | Work                    | Stable key, owner, description, claimed/complete state and result in shared state                                       |
 | Board/conversation      | Broadcast posts and two-peer threads with proposal revisions in shared state                                            |
 | Assessment              | Domain-specific peer observation tied to exact finding revisions in shared state                                        |
-| Answer candidate        | Current answer and reviews in memory; events persist for display, but continuation does not restore an active candidate |
+| Answer candidate        | Current answer and reviews in shared state; continuation replays the active candidate and reviews                       |
 | Team preferences        | Account's saved RunConfig in `preferences`                                                                              |
 | Virtual files/proposals | Account-scoped text and proposed edits in `files` / `proposals`, separate from real projects                            |
 | Benchmark report        | Suite metadata and trial results as JSON in `benchmarks`                                                                |
@@ -315,14 +315,17 @@ Completion requires:
 
 1. A candidate and at least one available peer.
 2. Endorsement of that candidate by every available peer.
-3. No disputed findings, unaccepted direct-thread proposals or claimed work.
-4. No task/challenge/tool-result mail pending for available peers.
-5. No active model turn.
+3. No negative candidate review from any peer, including a review preserved from
+   a peer that later became unavailable.
+4. No disputed findings, unaccepted direct-thread proposals or claimed work.
+5. No task/challenge/tool-result mail pending for available peers.
+6. No active model turn.
 
 `completed` means these protocol conditions were met, not that the answer is
 objectively correct or every real-world requirement was tested. A one-peer run
 can endorse its own proposal without independent review. If a peer is unavailable,
-completion can reflect available-peer agreement; that distinction is recorded.
+completion can reflect available-peer agreement only when that peer did not leave
+an unresolved negative candidate review; that distinction is recorded.
 
 Ordinary call-budget exhaustion or stagnation attempts a qualified synthesis
 using a remaining call. Fallback is the candidate or successful contributions.
@@ -338,17 +341,18 @@ status/absence messaging while pending; Discussion is the live work view.
 Provider failure first attempts another selected provider while retaining the
 agent's identity, task, partial public output and inbox. If unavailable, that peer
 is marked unavailable and unfinished work is offered to another available peer.
-Finding and conversation state remain, but an unavailable peer's negative
-final-candidate review can cease blocking completion in the current code; see
-[known issues](KNOWN_ISSUES.md). There is no predictive cost-aware routing,
-persistent circuit breaker or guarantee of equivalent replacement-model ability.
+Finding, conversation, candidate and review state remain. Negative candidate
+reviews from unavailable peers remain unresolved objections; an unchanged
+candidate must not become completed merely because the rejecting peer failed.
+There is no predictive cost-aware routing, persistent circuit breaker or
+guarantee of equivalent replacement-model ability.
 
 **Continue** creates a child run with fresh budgets and saved peers, tasks,
-inboxes, public contributions, findings, work, assessments, board and threads.
-It does not restart a generation from its interrupted token. Active candidate
-reviews, queue state, failure flags and research cache are not restored. The
-team must establish a current candidate. A normal follow-up instead includes
-bounded previous goal/answer context; it is not checkpoint continuation.
+inboxes, public contributions, findings, work, assessments, board, threads and
+the active candidate/reviews. It does not restart a generation from its
+interrupted token. Queue state, failure flags and research cache are not
+restored. A normal follow-up instead includes bounded previous goal/answer
+context; it is not checkpoint continuation.
 
 Cancellation does not undo file changes. A crash between an external side effect
 and checkpoint persistence is not transactionally repaired. Events and saved

@@ -1,21 +1,19 @@
 # Known issues and acceptance targets
 
-Draft, 2026-09-23. These items are not fixed by the documentation work. The
-recovery findings were reported in a separate review at `ef0a1da` and their
-source logic was inspected again; its reproductions were not rerun here.
+Draft, 2026-09-23; updated 2026-10-03 for the candidate recovery fixes. The
+original recovery findings were reported in a separate review at `ef0a1da`.
 
 ## Consensus and continuation
 
-| Issue                          | Observed code behavior                                                                                                                              | Required regression target                                                                                                                                                                   |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1: unavailable peer rejection | `settled()` excludes unavailable peers; a negative candidate review can cease blocking completion, and agreed finalization omits the objection list | Peer rejects candidate, then fails with no working replacement: unchanged answer must not become completed merely due to unavailability; objection remains visible until explicitly resolved |
-| P2: lost active candidate      | Checkpoint/continuation state omits candidate and reviews                                                                                           | Resume restores the exact candidate/revision and outstanding objections without incorrectly retaining stale endorsements                                                                     |
+| Issue                          | Current candidate status                                                                                                                                                 | Regression target                                                                                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1: unavailable peer rejection | Fixed in candidate source by keeping negative candidate reviews from every peer, including unavailable peers, as unresolved objections that block `completed`; verify the deployed revision before calling production fixed. | Peer rejects candidate, then fails with no working replacement: unchanged answer must not become completed merely due to unavailability; objection remains visible until explicitly resolved |
+| P2: lost active candidate      | Fixed in candidate source by saving the active candidate and reviews in shared checkpoint state and replaying them on continuation; verify the deployed revision before calling production fixed.                          | Resume restores the exact candidate/revision and outstanding objections without incorrectly retaining stale endorsements                                                                    |
 
 Finding disputes and unresolved direct-thread proposals have separate state and
 can still block completion. Do not conflate them with final-answer reviews.
-History can retain old candidate events while active review state is missing.
 Test failure, cancellation, budget stops, changed/identical candidates, multiple
-reviewers and restart paths, not just the happy path.
+reviewers and restart paths still need continued coverage as the engine evolves.
 
 ## Architecture and product gaps
 

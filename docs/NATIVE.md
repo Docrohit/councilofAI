@@ -53,6 +53,9 @@ a different environment variable. Do not put the key itself in `--key-env`.
 Supported kinds are `ollama`, `vllm`, `openai`, `anthropic`, `glm`, `compatible`.
 Models and keys must be available to your account; Council does not download
 weights or transfer your ChatGPT/Claude website subscription to API billing.
+For a RunPod vLLM model reached through an SSH tunnel, use the tunneled Mac URL,
+for example `--kind vllm --model qwen38-heretic --url http://127.0.0.1:18100/v1`.
+See [RunPod models](RUNPOD_MODELS.md) for direct, tunnel and bridge setups.
 
 One model can drive five peers; five models can drive ten peers. Peers share the
 same orchestration, evidence, direct-conversation, board, delegation and recovery
@@ -72,6 +75,8 @@ Start with concurrency 1 for a small model or shared working tree.
 | `/budget 40`, `/concurrency 1`                          | Set call and concurrency limits                                |
 | `/limits 12 3`                                          | Set total agent count and spawn depth                          |
 | `/limits unlimited unlimited`                           | Let peers grow within call/time budgets                        |
+| `/board-msg TEXT`, `/broadcast TEXT`                    | Post live guidance to the shared board during a run            |
+| `/dm AGENT TEXT`, `/chat AGENT TEXT`                    | Send live guidance directly to one peer during a run           |
 | `/files`, `/read path`, `/search text`                  | Browse and search the current project                          |
 | `/diff`                                                 | Inspect Git status and eligible file differences               |
 | `/edit path`                                            | Council's built-in text editor, including new files            |
@@ -88,6 +93,8 @@ Left/Right edit the draft; Ctrl+A/Ctrl+E move to its beginning/end; Ctrl+U clear
 Bracketed multiline paste stays in the draft until you press Enter.
 Type `/` for a filtered command menu, or Ctrl+P for a searchable command palette.
 Up/Down selects; Enter opens; Escape closes. Tab completes a slash-menu command.
+For `/dm` and `/chat`, use a peer ID such as `peer-1` or a single-token peer
+name such as `Atlas`; for names with spaces, use the peer ID.
 
 Outside menus, Tab/Shift+Tab switches **Discussion, Engagement, Board,
 Conversations, Findings, Answer, Tools, Files and Help**. Direct commands

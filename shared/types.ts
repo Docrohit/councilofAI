@@ -69,6 +69,13 @@ export interface Run {
 }
 export interface SharedState {
   communication?: import("../server/communication").CommunicationState;
+  candidate?: {
+    id: string;
+    author: string;
+    answer: string;
+    rationale: string;
+    reviews: Record<string, { agree: boolean; reason: string }>;
+  };
   peers: {
     member: Member;
     task: string;

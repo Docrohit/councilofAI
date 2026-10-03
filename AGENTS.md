@@ -106,10 +106,11 @@ Docker checks and release gates are listed in [deploy rules](deploy_rules.md).
 
 ## Current traps and handoff
 
-Two known consensus-recovery issues remain open: an unavailable peer's negative
-candidate review can cease blocking completion, and continuation does not
-restore the active candidate/reviews. Do not describe these as fixed. See
-[known issues](docs/KNOWN_ISSUES.md).
+Candidate answer/review state is checkpointed in the current candidate source,
+and unavailable peers' negative candidate reviews remain unresolved objections
+instead of disappearing from completion logic. Keep these regression tests in
+place and do not describe them as deployed or released without verifying the
+target installation. See [known issues](docs/KNOWN_ISSUES.md).
 
 Planned commercial accounts/trials, billing, PostgreSQL, native desktop apps,
 MCP and hosted LSP/Skills are not implemented. Native LSP and project Skills are

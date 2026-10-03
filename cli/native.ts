@@ -401,6 +401,14 @@ export class NativeCouncil {
       if (this.engine.postBoard(this.userId, id, content)) return true;
     return false;
   }
+  sendUserMessage(to: string, content: string) {
+    for (const id of this.engine.active.keys()) {
+      const result = this.engine.sendUserMessage(this.userId, id, to, content);
+      if (result.ok || result.error !== "This session is not currently running.")
+        return result;
+    }
+    return { ok: false, error: "A council must be running to send a message." };
+  }
   async close() {
     this.stop();
     for (let i = 0; this.engine.active.size && i < 300; i++)

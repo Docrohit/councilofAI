@@ -1,6 +1,6 @@
 import type { DB } from "./db.ts";
 import type { Store } from "./store.ts";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 export interface KiteConfig {
   enabled: boolean;
@@ -8,14 +8,36 @@ export interface KiteConfig {
   lastError?: string;
 }
 
-export function kiteStatus(db: DB, userId: string) {
+interface KiteSecrets {
+  accessToken?: string;
+  accessTokenUpdatedAt?: string;
+  apiSecret?: string;
+}
+
+export function kiteStatus(
+  db: DB,
+  store: Store,
+  userId: string,
+  appOrigin?: string,
+) {
   const row = rowFor(db, userId);
   if (!row) return { enabled: false, hasApiKey: false, hasAccessToken: false };
   const config = JSON.parse(row.config) as KiteConfig;
+  const secrets = readSecrets(store, row);
+  const loginUrl =
+    config.apiKey && secrets.apiSecret
+      ? `https://kite.zerodha.com/connect/login?v=3&api_key=${encodeURIComponent(config.apiKey)}`
+      : undefined;
   return {
     enabled: !!config.enabled,
     hasApiKey: !!config.apiKey,
-    hasAccessToken: !!row.secret,
+    hasApiSecret: !!secrets.apiSecret,
+    hasAccessToken: !!secrets.accessToken,
+    accessTokenUpdatedAt: secrets.accessTokenUpdatedAt,
+    callbackUrl: appOrigin
+      ? `${appOrigin.replace(/\/$/, "")}/api/integrations/kite/callback`
+      : undefined,
+    loginUrl,
     lastError: config.lastError,
   };
 }
@@ -24,20 +46,29 @@ export function saveKite(
   db: DB,
   store: Store,
   userId: string,
-  input: { enabled: boolean; apiKey?: string; accessToken?: string },
+  input: {
+    enabled: boolean;
+    apiKey?: string;
+    apiSecret?: string;
+    accessToken?: string;
+  },
 ) {
   const existing = rowFor(db, userId);
   const config: KiteConfig = existing
     ? JSON.parse(existing.config)
     : { enabled: false };
+  const secrets = existing ? readSecrets(store, existing) : {};
   if (input.apiKey?.trim()) config.apiKey = input.apiKey.trim();
+  if (input.apiSecret?.trim()) secrets.apiSecret = input.apiSecret.trim();
+  if (input.accessToken?.trim()) {
+    secrets.accessToken = input.accessToken.trim();
+    secrets.accessTokenUpdatedAt = new Date().toISOString();
+  }
   config.enabled = input.enabled;
   config.lastError = undefined;
-  const secret = input.accessToken?.trim()
-    ? store.secrets.encrypt(input.accessToken.trim())
-    : existing?.secret || "";
-  if (config.enabled && (!config.apiKey || !secret))
+  if (config.enabled && (!config.apiKey || !secrets.accessToken))
     throw new Error("Kite needs both api_key and today's access_token.");
+  const secret = writeSecrets(store, secrets);
   db.prepare(
     "INSERT INTO integrations(id,user_id,kind,config,secret) VALUES(?,?,?,?,?) ON CONFLICT(user_id,kind) DO UPDATE SET config=excluded.config,secret=excluded.secret",
   ).run(
@@ -47,7 +78,7 @@ export function saveKite(
     JSON.stringify(config),
     secret,
   );
-  return kiteStatus(db, userId);
+  return kiteStatus(db, store, userId);
 }
 
 export function clearKite(db: DB, userId: string) {
@@ -60,7 +91,7 @@ export function kiteClient(db: DB, store: Store, userId: string) {
   const row = rowFor(db, userId);
   if (!row) throw new Error("Kite connection is not configured.");
   const config = JSON.parse(row.config) as KiteConfig;
-  const accessToken = store.secrets.decrypt(row.secret);
+  const accessToken = readSecrets(store, row).accessToken;
   if (!config.enabled || !config.apiKey || !accessToken)
     throw new Error("Kite connection is disabled or missing today's token.");
   const headers = {
@@ -84,6 +115,50 @@ export function kiteClient(db: DB, store: Store, userId: string) {
       return payload;
     },
   };
+}
+
+export async function refreshKiteAccessToken(
+  db: DB,
+  store: Store,
+  userId: string,
+  requestToken: string,
+) {
+  const row = rowFor(db, userId);
+  if (!row) throw new Error("Save the Kite API key and API secret first.");
+  const config = JSON.parse(row.config) as KiteConfig;
+  const secrets = readSecrets(store, row);
+  if (!config.apiKey || !secrets.apiSecret)
+    throw new Error("Save the Kite API key and API secret first.");
+  const checksum = createHash("sha256")
+    .update(`${config.apiKey}${requestToken.trim()}${secrets.apiSecret}`)
+    .digest("hex");
+  const response = await fetch("https://api.kite.trade/session/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Kite-Version": "3",
+    },
+    body: new URLSearchParams({
+      api_key: config.apiKey,
+      request_token: requestToken.trim(),
+      checksum,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.status === "error") {
+    config.lastError =
+      payload?.message || `Kite token refresh failed (${response.status}).`;
+    saveRaw(db, store, row, config, secrets);
+    throw new Error(config.lastError);
+  }
+  const accessToken = payload?.data?.access_token;
+  if (!accessToken) throw new Error("Kite did not return an access_token.");
+  secrets.accessToken = accessToken;
+  secrets.accessTokenUpdatedAt = new Date().toISOString();
+  config.enabled = true;
+  config.lastError = undefined;
+  saveRaw(db, store, row, config, secrets);
+  return kiteStatus(db, store, userId);
 }
 
 export async function kiteQuote(
@@ -202,6 +277,42 @@ function rowFor(db: DB, userId: string) {
   return db
     .prepare("SELECT * FROM integrations WHERE user_id=? AND kind='kite'")
     .get(userId) as any;
+}
+
+function readSecrets(store: Store, row: any): KiteSecrets {
+  if (!row?.secret) return {};
+  const plaintext = store.secrets.decrypt(row.secret);
+  if (!plaintext) return {};
+  try {
+    const parsed = JSON.parse(plaintext);
+    if (parsed && typeof parsed === "object") return parsed as KiteSecrets;
+  } catch {
+    // Older Council releases stored only the encrypted access token string.
+  }
+  return { accessToken: plaintext };
+}
+
+function writeSecrets(store: Store, secrets: KiteSecrets) {
+  const compact = Object.fromEntries(
+    Object.entries(secrets).filter(([, value]) => !!value),
+  );
+  return Object.keys(compact).length
+    ? store.secrets.encrypt(JSON.stringify(compact))
+    : "";
+}
+
+function saveRaw(
+  db: DB,
+  store: Store,
+  row: any,
+  config: KiteConfig,
+  secrets: KiteSecrets,
+) {
+  db.prepare("UPDATE integrations SET config=?, secret=? WHERE id=?").run(
+    JSON.stringify(config),
+    writeSecrets(store, secrets),
+    row.id,
+  );
 }
 
 function parseCsv(text: string) {

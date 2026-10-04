@@ -33,7 +33,12 @@ import {
 } from "./benchmarks.ts";
 import { complete } from "./providers.ts";
 import { TelegramBridge } from "./telegram.ts";
-import { clearKite, kiteStatus, saveKite } from "./kite.ts";
+import {
+  clearKite,
+  kiteStatus,
+  refreshKiteAccessToken,
+  saveKite,
+} from "./kite.ts";
 import type { Provider, Run, User } from "../shared/types.ts";
 import {
   PAYMENT_SCREENSHOT_MAX_BYTES,
@@ -825,18 +830,64 @@ export function createApp(directory: string, production = false) {
     res.json({ ok: true });
   });
   app.get("/api/integrations/kite", (_req, res) =>
-    res.json(kiteStatus(db, userOf(res).id)),
+    res.json(kiteStatus(db, store, userOf(res).id, appOrigin)),
   );
+  app.get("/api/integrations/kite/callback", async (req, res) => {
+    const requestToken = z.string().trim().min(10).max(500).safeParse(
+      req.query.request_token,
+    );
+    if (!requestToken.success) {
+      res.status(400).send("Kite did not return a request_token.");
+      return;
+    }
+    try {
+      await refreshKiteAccessToken(
+        db,
+        store,
+        userOf(res).id,
+        requestToken.data,
+      );
+      res
+        .status(200)
+        .send(
+          "Kite is connected for today. You can close this tab and return to Council.",
+        );
+    } catch (e) {
+      res
+        .status(400)
+        .send(`Kite refresh failed: ${(e as Error).message}`);
+    }
+  });
   app.put("/api/integrations/kite", (req, res) => {
     const data = z
       .object({
         enabled: z.boolean(),
         apiKey: z.string().trim().max(200).optional(),
+        apiSecret: z.string().trim().max(1000).optional(),
         accessToken: z.string().trim().max(1000).optional(),
       })
       .parse(req.body);
     try {
       res.json(saveKite(db, store, userOf(res).id, data));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  app.post("/api/integrations/kite/request-token", async (req, res) => {
+    const data = z
+      .object({
+        requestToken: z.string().trim().min(10).max(500),
+      })
+      .parse(req.body);
+    try {
+      res.json(
+        await refreshKiteAccessToken(
+          db,
+          store,
+          userOf(res).id,
+          data.requestToken,
+        ),
+      );
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }

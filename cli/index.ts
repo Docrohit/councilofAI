@@ -585,7 +585,8 @@ async function main() {
           `Account: ${status.accessApproved ? "approved" : status.needsPayment ? "payment needed" : "free tier"}`,
           `Email: ${status.emailVerified ? "confirmed" : "pending"}`,
           `Free messages: ${status.freeUsed}/${status.freeLimit}`,
-          `Payment: ${status.paymentSatoshis.toLocaleString("en-US")} satoshis`,
+          `Payment: ${status.paymentSatoshis.toLocaleString("en-US")} satoshis quarterly${typeof status.paymentUsdEstimate === "number" ? ` (about $${status.paymentUsdEstimate.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD now)` : ""}`,
+          `Usage cap rule: max expected token cost plus ${status.tokenBudgetMarginPercent ?? 25}% margin`,
           `Lightning wallet: ${status.lightningWallet || "not configured"}`,
           payments.length ? "Submissions:" : "Submissions: none",
           ...payments.map(

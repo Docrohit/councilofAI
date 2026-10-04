@@ -38,6 +38,7 @@ import type { Provider, Run, User } from "../shared/types.ts";
 import {
   PAYMENT_SCREENSHOT_MAX_BYTES,
   accountStatus,
+  accountStatusWithPricing,
   assertCanSend,
   confirmEmailToken,
   confirmationRequired,
@@ -45,8 +46,10 @@ import {
   paymentSubmissions,
   paymentImage,
   recordUserMessage,
+  resetPasswordToken,
   reviewPaymentSubmission,
   sendConfirmationEmail,
+  sendPasswordResetEmail,
   sendPaymentScreenshot,
   isBillingAdmin,
 } from "./billing.ts";
@@ -59,6 +62,16 @@ const credentials = z.object({
   password: z.string().min(10).max(200),
   name: z.string().trim().min(1).max(60).optional(),
   inviteCode: z.string().optional(),
+});
+const emailOnly = z.object({
+  email: z
+    .email()
+    .max(254)
+    .transform((s) => s.toLowerCase()),
+});
+const resetPassword = z.object({
+  token: z.string().min(20).max(200),
+  password: z.string().min(10).max(200),
 });
 const providerSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -458,6 +471,42 @@ export function createApp(directory: string, production = false) {
     cookie(res, issueSession(user.id, "cookie"));
     res.json({ user });
   });
+  app.post("/api/auth/password/forgot", authLimit, async (req, res) => {
+    const data = emailOnly.parse(req.body);
+    try {
+      await sendPasswordResetEmail(db, data.email, appOrigin);
+    } catch (e) {
+      if (process.env.NODE_ENV === "production")
+        console.warn("Password reset email failed", e);
+    }
+    res.json({
+      ok: true,
+      message:
+        "If that email is registered, a password reset link will arrive shortly.",
+    });
+  });
+  app.post("/api/auth/password/reset", authLimit, async (req, res) => {
+    const data = resetPassword.parse(req.body);
+    const userId = resetPasswordToken(db, data.token);
+    if (!userId) {
+      res.status(400).json({ error: "Password reset link is invalid or expired." });
+      return;
+    }
+    const hashed = await hashPassword(data.password);
+    db.prepare(
+      "UPDATE users SET password=?,email_verified=1,confirmed_at=COALESCE(confirmed_at,?) WHERE id=?",
+    ).run(hashed, new Date().toISOString(), userId);
+    db.prepare("DELETE FROM sessions WHERE user_id=?").run(userId);
+    cookie(res, issueSession(userId, "cookie"));
+    const row = db
+      .prepare("SELECT id,email,name FROM users WHERE id=?")
+      .get(userId) as Pick<User, "id" | "email" | "name"> | undefined;
+    if (!row) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json({ user: row });
+  });
   const admin = (req: Request, res: Response, next: NextFunction) => {
     const token = req.headers.authorization?.startsWith("Bearer ")
       ? req.headers.authorization.slice(7)
@@ -610,10 +659,10 @@ export function createApp(directory: string, production = false) {
     );
     res.json({ ok: true });
   });
-  app.get("/api/me", (_req, res) =>
+  app.get("/api/me", async (_req, res) =>
     res.json({
       user: userOf(res),
-      billing: accountStatus(db, userOf(res).id),
+      billing: await accountStatusWithPricing(db, userOf(res).id),
       billingAdmin: isBillingAdmin(userOf(res).email),
     }),
   );
@@ -651,8 +700,8 @@ export function createApp(directory: string, production = false) {
     }
     res.json({ ok: true });
   });
-  app.get("/api/billing", (_req, res) =>
-    res.json(accountStatus(db, userOf(res).id)),
+  app.get("/api/billing", async (_req, res) =>
+    res.json(await accountStatusWithPricing(db, userOf(res).id)),
   );
   app.get("/api/billing/payments", (_req, res) =>
     res.json(paymentSubmissions(db, userOf(res).id)),

@@ -13,6 +13,12 @@ export interface AccountStatus {
   freeUsed: number;
   freeRemaining: number | null;
   paymentSatoshis: number;
+  paymentBtc: number;
+  paymentUsdEstimate: number | null;
+  paymentUsdSource: string;
+  paymentUsdUpdatedAt: string | null;
+  billingPeriodMonths: number;
+  tokenBudgetMarginPercent: number;
   paymentEmail: string;
   lightningWallet: string;
   needsPayment: boolean;
@@ -48,8 +54,63 @@ export function paymentSatoshis() {
   return Number.isSafeInteger(value) && value > 0 ? value : 100000;
 }
 
+export function paymentBtc() {
+  return paymentSatoshis() / 100_000_000;
+}
+
+export function billingPeriodMonths() {
+  const value = Number(process.env.BILLING_PERIOD_MONTHS || 3);
+  return Number.isSafeInteger(value) && value > 0 ? value : 3;
+}
+
+export function tokenBudgetMarginPercent() {
+  const value = Number(process.env.TOKEN_BUDGET_MARGIN_PERCENT || 25);
+  return Number.isFinite(value) && value >= 0 ? value : 25;
+}
+
 export function lightningWallet() {
   return process.env.LIGHTNING_WALLET || "";
+}
+
+let btcUsdCache:
+  | { usd: number; updatedAt: string; expires: number; source: string }
+  | null = null;
+
+export async function btcUsdPrice() {
+  const override = Number(process.env.BTC_USD_PRICE);
+  if (Number.isFinite(override) && override > 0)
+    return {
+      usd: override,
+      updatedAt: new Date().toISOString(),
+      source: "BTC_USD_PRICE",
+    };
+  if (btcUsdCache && btcUsdCache.expires > Date.now()) return btcUsdCache;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(
+      "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+      { signal: controller.signal },
+    );
+    if (!response.ok) throw new Error(`BTC price lookup failed ${response.status}`);
+    const body = (await response.json()) as {
+      data?: { amount?: string; currency?: string };
+    };
+    const usd = Number(body.data?.amount);
+    if (!Number.isFinite(usd) || usd <= 0)
+      throw new Error("BTC price lookup returned no USD amount");
+    btcUsdCache = {
+      usd,
+      updatedAt: new Date().toISOString(),
+      expires: Date.now() + 10 * 60_000,
+      source: "Coinbase BTC-USD spot",
+    };
+    return btcUsdCache;
+  } catch {
+    return btcUsdCache;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function billingAdminEmails() {
@@ -91,9 +152,27 @@ export function accountStatus(db: DB, userId: string): AccountStatus {
     freeUsed: used,
     freeRemaining: approved ? null : Math.max(0, limit - used),
     paymentSatoshis: paymentSatoshis(),
+    paymentBtc: paymentBtc(),
+    paymentUsdEstimate: null,
+    paymentUsdSource: "unavailable",
+    paymentUsdUpdatedAt: null,
+    billingPeriodMonths: billingPeriodMonths(),
+    tokenBudgetMarginPercent: tokenBudgetMarginPercent(),
     paymentEmail: businessEmail(),
     lightningWallet: lightningWallet(),
     needsPayment: !approved && used >= limit,
+  };
+}
+
+export async function accountStatusWithPricing(db: DB, userId: string) {
+  const status = accountStatus(db, userId);
+  const price = await btcUsdPrice();
+  if (!price) return status;
+  return {
+    ...status,
+    paymentUsdEstimate: Math.round(status.paymentBtc * price.usd * 100) / 100,
+    paymentUsdSource: price.source,
+    paymentUsdUpdatedAt: price.updatedAt,
   };
 }
 
@@ -173,7 +252,7 @@ export function paymentRequiredMessage(status: AccountStatus) {
   const wallet = status.lightningWallet
     ? ` to ${status.lightningWallet}`
     : " to the configured Lightning wallet";
-  return `Free message limit reached (${status.freeLimit}/${status.freeLimit}). Pay ${status.paymentSatoshis.toLocaleString("en-US")} satoshis${wallet}, then upload the payment screenshot from Billing. Your account will be reviewed within 24 hours.`;
+  return `Free message limit reached (${status.freeLimit}/${status.freeLimit}). Pay ${status.paymentSatoshis.toLocaleString("en-US")} satoshis for quarterly access${wallet}, then upload the payment screenshot from Billing. Your account will be reviewed within 24 hours.`;
 }
 
 function smtpConfigured() {
@@ -249,6 +328,56 @@ export function confirmEmailToken(db: DB, token: string) {
   return row.user_id;
 }
 
+export async function sendPasswordResetEmail(
+  db: DB,
+  email: string,
+  appOrigin: string,
+) {
+  const user = db
+    .prepare("SELECT id,email FROM users WHERE email=?")
+    .get(email.toLowerCase()) as { id: string; email: string } | undefined;
+  if (!user) return { sent: false };
+  const token = randomBytes(32).toString("base64url");
+  db.prepare("DELETE FROM email_tokens WHERE user_id=? AND purpose=?").run(
+    user.id,
+    "password-reset",
+  );
+  db.prepare(
+    "INSERT INTO email_tokens(user_id,hash,purpose,expires,created_at) VALUES(?,?,?,?,?)",
+  ).run(
+    user.id,
+    tokenHash(token),
+    "password-reset",
+    Date.now() + 60 * 60_000,
+    new Date().toISOString(),
+  );
+  const url = new URL("/", appOrigin);
+  url.searchParams.set("reset", token);
+  await transport().sendMail({
+    from: process.env.SMTP_FROM || businessEmail(),
+    to: user.email,
+    subject: "Reset your Council password",
+    text: `Reset your Council password by opening this link:\n\n${url.toString()}\n\nThis link expires in 1 hour. Ignore this email if you did not request it.`,
+    html: `<p>Reset your Council password by opening this link:</p><p><a href="${url.toString()}">${url.toString()}</a></p><p>This link expires in 1 hour. Ignore this email if you did not request it.</p>`,
+  });
+  return { sent: true };
+}
+
+export function resetPasswordToken(db: DB, token: string) {
+  const hash = tokenHash(token);
+  const row = db
+    .prepare("SELECT user_id,expires FROM email_tokens WHERE hash=? AND purpose=?")
+    .get(hash, "password-reset") as
+    | { user_id: string; expires: number }
+    | undefined;
+  if (!row || row.expires < Date.now()) return null;
+  db.prepare("DELETE FROM email_tokens WHERE user_id=? AND purpose=?").run(
+    row.user_id,
+    "password-reset",
+  );
+  return row.user_id;
+}
+
 export function paymentMime(mime: string) {
   return ["image/png", "image/jpeg", "image/webp"].includes(mime);
 }
@@ -285,7 +414,7 @@ export async function sendPaymentScreenshot(
       `Council payment screenshot submitted.`,
       `User: ${user.name} <${user.email}>`,
       `User ID: ${user.id}`,
-      `Amount expected: ${paymentSatoshis()} satoshis`,
+      `Amount expected: ${paymentSatoshis()} satoshis for quarterly access`,
       `Submission ID: ${id}`,
       "",
       "Approve after manual verification through the admin endpoint.",

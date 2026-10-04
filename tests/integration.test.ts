@@ -9,7 +9,9 @@ import { Bridge } from "../server/bridge.ts";
 import { TelegramBridge } from "../server/telegram.ts";
 import type { RunConfig } from "../shared/types.ts";
 import { extractPage } from "../server/research.ts";
+import { tokenHash } from "../server/security.ts";
 process.env.DEMO_DELAY_MS = "0";
+process.env.BTC_USD_PRICE = "85000";
 const pause = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 async function harness(work: (ctx: any) => Promise<void>) {
   const dir = mkdtempSync(path.join(tmpdir(), "council-test-"));
@@ -255,6 +257,48 @@ test("free message limit blocks sends until backend approval", async () => {
     else process.env.ADMIN_TOKEN = previousAdmin;
   }
 });
+test("forgot password reset token updates credentials and signs in", async () =>
+  harness(async ({ api, db }: any) => {
+    const signup = await api("/auth/signup", {
+      name: "Reset User",
+      email: "reset-user@example.test",
+      password: "old-password-123",
+    });
+    assert.equal(signup.status, 201);
+    const generic = await api("/auth/password/forgot", {
+      email: "reset-user@example.test",
+    });
+    assert.equal(generic.status, 200);
+    const token = "reset-token-fixture-that-is-long-enough";
+    const userId = (
+      db.prepare("SELECT id FROM users WHERE email=?").get("reset-user@example.test") as any
+    ).id;
+    db.prepare(
+      "INSERT INTO email_tokens(user_id,hash,purpose,expires,created_at) VALUES(?,?,?,?,?)",
+    ).run(
+      userId,
+      tokenHash(token),
+      "password-reset",
+      Date.now() + 60_000,
+      new Date().toISOString(),
+    );
+    const reset = await api("/auth/password/reset", {
+      token,
+      password: "new-password-456",
+    });
+    assert.equal(reset.status, 200);
+    assert.equal(reset.data.user.email, "reset-user@example.test");
+    const oldLogin = await api("/auth/login", {
+      email: "reset-user@example.test",
+      password: "old-password-123",
+    });
+    assert.equal(oldLogin.status, 401);
+    const newLogin = await api("/auth/login", {
+      email: "reset-user@example.test",
+      password: "new-password-456",
+    });
+    assert.equal(newLogin.status, 200);
+  }));
 test("billing admin can review screenshot and approve paid users", async () =>
   harness(async ({ api, base, db }: any) => {
     const admin = await api("/auth/signup", {
@@ -271,6 +315,9 @@ test("billing admin can review screenshot and approve paid users", async () =>
     assert.equal(user.status, 201);
     const me = await api("/me", undefined, admin.cookie);
     assert.equal(me.data.billingAdmin, true);
+    assert.equal(me.data.billing.accessApproved, true);
+    assert.equal(me.data.billing.paymentUsdEstimate, 85);
+    assert.equal(me.data.billing.billingPeriodMonths, 3);
     const userId = (
       db.prepare("SELECT id FROM users WHERE email=?").get("paid-user@example.test") as any
     ).id;

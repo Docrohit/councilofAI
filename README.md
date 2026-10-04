@@ -91,6 +91,10 @@ BILLING_ADMIN_EMAILS=cosmicwisdomyt@gmail.com,rohitsharma9000@gmail.com
 LIGHTNING_WALLET=your-lightning-invoice-or-address
 FREE_MESSAGE_LIMIT=10
 PAYMENT_SATOSHIS=100000
+BILLING_PERIOD_MONTHS=3
+TOKEN_BUDGET_MARGIN_PERCENT=25
+# Optional fixed display override; omit for live Coinbase BTC-USD spot lookup.
+# BTC_USD_PRICE=
 ```
 
 Users get 10 free user/board messages by default. After that, the server blocks
@@ -99,7 +103,20 @@ upload a PNG/JPG/WebP Lightning payment screenshot; the screenshot is emailed to
 `BUSINESS_EMAIL` for manual review and is stored server-side for review by
 billing admins. Signed-in users whose email appears in `BILLING_ADMIN_EMAILS`
 see **Approve paid users** in the app sidebar; approving a screenshot unlocks
-that account.
+that account. Billing admin accounts are treated as approved automatically, so
+the default approvers `cosmicwisdomyt@gmail.com` and
+`rohitsharma9000@gmail.com` can use Council without message caps.
+
+The default paid plan is `PAYMENT_SATOSHIS=100000` for quarterly access
+(`BILLING_PERIOD_MONTHS=3`). The app converts that satoshi amount to BTC and
+shows a live USD estimate from Coinbase BTC-USD spot pricing when available.
+Set `BTC_USD_PRICE` only if you need a fixed/manual display value. Usage limits
+should be set from the highest expected token price at the maximum token budget,
+with `TOKEN_BUDGET_MARGIN_PERCENT=25` as the default margin.
+
+The login page includes **Forgot password?**. Password reset links use the same
+SMTP settings as signup confirmation, expire after 1 hour, invalidate existing
+sessions after reset, and confirm the email address when the reset succeeds.
 
 Backend approval remains available with `ADMIN_TOKEN`:
 

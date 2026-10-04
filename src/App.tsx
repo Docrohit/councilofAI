@@ -93,6 +93,12 @@ interface BillingStatus {
   freeUsed: number;
   freeRemaining: number | null;
   paymentSatoshis: number;
+  paymentBtc: number;
+  paymentUsdEstimate: number | null;
+  paymentUsdSource: string;
+  paymentUsdUpdatedAt: string | null;
+  billingPeriodMonths: number;
+  tokenBudgetMarginPercent: number;
   paymentEmail: string;
   lightningWallet: string;
   needsPayment: boolean;
@@ -164,6 +170,8 @@ function Modal({
 }
 function Auth({ onUser }: { onUser: (user: User) => void }) {
   const [signup, setSignup] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [resetToken, setResetToken] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -176,7 +184,50 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
     api("/info")
       .then(setInfo)
       .catch(() => {});
+    const token = new URLSearchParams(window.location.search).get("reset");
+    if (token) {
+      setResetToken(token);
+      setForgot(false);
+      setSignup(false);
+    }
   }, []);
+  async function forgotSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError("");
+    setNotice("");
+    setLoading(true);
+    const values = Object.fromEntries(new FormData(e.currentTarget));
+    try {
+      const result = await api("/auth/password/forgot", "POST", values);
+      setNotice(
+        result.message ||
+          "If that email is registered, a password reset link will arrive shortly.",
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function resetSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError("");
+    setNotice("");
+    setLoading(true);
+    const values = Object.fromEntries(new FormData(e.currentTarget));
+    try {
+      const result = await api("/auth/password/reset", "POST", {
+        ...values,
+        token: resetToken,
+      });
+      window.history.replaceState({}, "", "/");
+      onUser(result.user);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
@@ -254,11 +305,84 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
         </div>
         <div className="auth-card">
           <div className="eyebrow">WELCOME TO COUNCIL</div>
-          <h2>{signup ? "Create your workspace" : "Enter your workspace"}</h2>
+          <h2>
+            {resetToken
+              ? "Reset your password"
+              : forgot
+                ? "Recover your workspace"
+                : signup
+                  ? "Create your workspace"
+                  : "Enter your workspace"}
+          </h2>
           <p className="muted">
-            Your conversations, models, and team. In one place.
+            {resetToken
+              ? "Choose a new password for your Council account."
+              : forgot
+                ? "Enter your email and Council will send a reset link."
+                : "Your conversations, models, and team. In one place."}
           </p>
-          <form onSubmit={submit}>
+          {resetToken ? (
+            <form onSubmit={resetSubmit}>
+              <label>
+                New password
+                <input
+                  name="password"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder="At least 10 characters"
+                  minLength={10}
+                  maxLength={200}
+                  required
+                />
+              </label>
+              {error && (
+                <div role="alert" className="error">
+                  {error}
+                </div>
+              )}
+              {notice && <div className="success-note">{notice}</div>}
+              <button className="primary auth-submit" disabled={loading}>
+                {loading ? (
+                  <LoaderCircle className="spin" size={18} />
+                ) : (
+                  <>
+                    Reset password
+                    <ArrowUpRight size={18} />
+                  </>
+                )}
+              </button>
+            </form>
+          ) : forgot ? (
+            <form onSubmit={forgotSubmit}>
+              <label>
+                Email address
+                <input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  required
+                />
+              </label>
+              {error && (
+                <div role="alert" className="error">
+                  {error}
+                </div>
+              )}
+              {notice && <div className="success-note">{notice}</div>}
+              <button className="primary auth-submit" disabled={loading}>
+                {loading ? (
+                  <LoaderCircle className="spin" size={18} />
+                ) : (
+                  <>
+                    Send reset link
+                    <ArrowUpRight size={18} />
+                  </>
+                )}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={submit}>
             {signup && (
               <label>
                 Your name
@@ -316,12 +440,41 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
               )}
             </button>
           </form>
-          {info.signup && (
+          )}
+          {!resetToken && !signup && !forgot && (
+            <p className="auth-switch">
+              <button
+                onClick={() => {
+                  setForgot(true);
+                  setError("");
+                  setNotice("");
+                }}
+              >
+                Forgot password?
+              </button>
+            </p>
+          )}
+          {forgot && (
+            <p className="auth-switch">
+              Remembered it?{" "}
+              <button
+                onClick={() => {
+                  setForgot(false);
+                  setError("");
+                  setNotice("");
+                }}
+              >
+                Sign in
+              </button>
+            </p>
+          )}
+          {info.signup && !forgot && !resetToken && (
             <p className="auth-switch">
               {signup ? "Already have a workspace?" : "New to Council?"}{" "}
               <button
                 onClick={() => {
                   setSignup(!signup);
+                  setForgot(false);
                   setError("");
                   setNotice("");
                 }}
@@ -879,6 +1032,21 @@ function BillingPanel({
       setBusy(false);
     }
   }
+  const usdEstimate =
+    typeof status?.paymentUsdEstimate === "number"
+      ? new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+          maximumFractionDigits: 2,
+        }).format(status.paymentUsdEstimate)
+      : "";
+  const btcAmount =
+    typeof status?.paymentBtc === "number"
+      ? status.paymentBtc.toLocaleString("en-US", {
+          minimumFractionDigits: 8,
+          maximumFractionDigits: 8,
+        })
+      : "";
   return (
     <div className="settings-panel billing-panel">
       <div className="settings-section">
@@ -914,11 +1082,24 @@ function BillingPanel({
         <h3>Lightning payment</h3>
         <p className="muted">
           Pay {status?.paymentSatoshis?.toLocaleString("en-US") || "100,000"}{" "}
-          satoshis
+          satoshis for quarterly access
           {status?.lightningWallet ? ` to ${status.lightningWallet}` : ""}.
-          Then upload a screenshot. It will be emailed for manual review, and
-          approval should happen within 24 hours.
+          {btcAmount ? ` That is ${btcAmount} BTC` : ""}
+          {usdEstimate ? `, about ${usdEstimate} right now` : ""}. Then upload
+          a screenshot. It will be emailed for manual review, and approval
+          should happen within 24 hours.
         </p>
+        <p className="field-help">
+          The upper usage limit should be set from the highest expected token
+          price at the maximum tokens allowed, plus a{" "}
+          {status?.tokenBudgetMarginPercent ?? 25}% margin.
+        </p>
+        {status?.paymentUsdUpdatedAt && (
+          <p className="field-help">
+            USD estimate from {status.paymentUsdSource}, updated{" "}
+            {new Date(status.paymentUsdUpdatedAt).toLocaleString()}.
+          </p>
+        )}
         {!status?.lightningWallet && (
           <div className="error">
             Lightning wallet is not configured on the server yet.

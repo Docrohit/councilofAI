@@ -41,13 +41,9 @@ test("cancelled baseline preserves the council answer and owner-private report",
   const dir = mkdtempSync(path.join(tmpdir(), "council-benchmark-"));
   const db = openDb(dir),
     store = new Store(db, dir);
-  db.prepare("INSERT INTO users VALUES(?,?,?,?,?)").run(
-    "owner",
-    "bench@example.test",
-    "Owner",
-    "unused",
-    new Date().toISOString(),
-  );
+  db.prepare(
+    "INSERT INTO users(id,email,name,password,created_at) VALUES(?,?,?,?,?)",
+  ).run("owner", "bench@example.test", "Owner", "unused", new Date().toISOString());
   db.prepare("INSERT INTO providers VALUES(?,?,?,?)").run(
     "provider",
     "owner",
@@ -144,7 +140,9 @@ test("restart recovery clears progress and preserves completed Council answers",
       path.join(tmpdir(), "council-benchmark-restart-"),
     );
     const db = openDb(directory);
-    db.prepare("INSERT INTO users VALUES(?,?,?,?,?)").run(
+    db.prepare(
+      "INSERT INTO users(id,email,name,password,created_at) VALUES(?,?,?,?,?)",
+    ).run(
       "owner",
       "restart@example.test",
       "Owner",

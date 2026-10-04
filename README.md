@@ -73,6 +73,38 @@ npm start
 
 The project uses React, TypeScript, Express, SQLite, and server-sent events. Its default configuration binds to loopback. All state lives in `.council/`, which is excluded from Git. A local encryption key is created automatically; back it up with the database.
 
+## Hosted signup and billing
+
+Hosted mode requires email confirmation before login. Configure SMTP through
+server environment variables, never by committing passwords:
+
+```sh
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=cosmicwisdomyt@gmail.com
+SMTP_PASS=your-google-app-password
+SMTP_FROM=cosmicwisdomyt@gmail.com
+BUSINESS_EMAIL=cosmicwisdomyt@gmail.com
+ADMIN_TOKEN=a-long-random-admin-token
+LIGHTNING_WALLET=your-lightning-invoice-or-address
+FREE_MESSAGE_LIMIT=10
+PAYMENT_SATOSHIS=100000
+```
+
+Users get 10 free user/board messages by default. After that, the server blocks
+new user messages unless the account is approved. The Billing screen lets a user
+upload a PNG/JPG/WebP Lightning payment screenshot; the screenshot is emailed to
+`BUSINESS_EMAIL` for manual review. Approve an account from the backend with:
+
+```sh
+curl -X POST https://councilofai.nftforger.com/api/admin/users/USER_ID/approval \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "X-Council-Request: 1" \
+  -d '{"approved":true}'
+```
+
 ## Code with real project tools
 
 Use `council` from the project directory for native multi-file coding, shell

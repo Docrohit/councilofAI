@@ -82,6 +82,7 @@ export class TelegramBridge {
         attachmentIds?: string[];
       },
     ) => Promise<Run>,
+    private chargeMessage: (userId: string) => void,
   ) {}
 
   status(userId: string) {
@@ -254,6 +255,12 @@ export class TelegramBridge {
     }
     const goal = parseGoal(effectiveText);
     if (goal && active && ["queued", "running"].includes(active.status)) {
+      try {
+        this.chargeMessage(userId);
+      } catch (error) {
+        await this.send(token, chatId, (error as Error).message);
+        return;
+      }
       const result = this.engine.updateGoal(userId, active.id, goal.goal, {
         minMinutes: goal.minMinutes,
         maxMinutes: goal.maxMinutes,
@@ -282,6 +289,12 @@ export class TelegramBridge {
       return;
     }
     if (active && ["queued", "running"].includes(active.status)) {
+      try {
+        this.chargeMessage(userId);
+      } catch (error) {
+        await this.send(token, chatId, (error as Error).message);
+        return;
+      }
       if (attachments.length) {
         const result = this.engine.addAttachments(
           userId,
@@ -329,18 +342,24 @@ export class TelegramBridge {
         config.members.length * 6 + 12,
       );
     }
-    const run = await this.startRun(userId, {
-      prompt: goal?.goal || effectiveText,
-      config,
-      attachmentIds: await this.persistAttachments(userId, attachments),
-      ...(goal
-        ? {
-            goalMode: true,
-            minGoalMinutes: goal.minMinutes,
-            maxGoalMinutes: goal.maxMinutes,
-          }
-        : {}),
-    });
+    let run: Run;
+    try {
+      run = await this.startRun(userId, {
+        prompt: goal?.goal || effectiveText,
+        config,
+        attachmentIds: await this.persistAttachments(userId, attachments),
+        ...(goal
+          ? {
+              goalMode: true,
+              minGoalMinutes: goal.minMinutes,
+              maxGoalMinutes: goal.maxMinutes,
+            }
+          : {}),
+      });
+    } catch (error) {
+      await this.send(token, chatId, (error as Error).message);
+      return;
+    }
     this.saveConfig(userId, (next) => {
       next.chats ||= {};
       next.chats[chatId] = {

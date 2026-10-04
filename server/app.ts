@@ -35,6 +35,16 @@ import { complete } from "./providers.ts";
 import { TelegramBridge } from "./telegram.ts";
 import { clearKite, kiteStatus, saveKite } from "./kite.ts";
 import type { Provider, Run, User } from "../shared/types.ts";
+import {
+  PAYMENT_SCREENSHOT_MAX_BYTES,
+  accountStatus,
+  assertCanSend,
+  confirmEmailToken,
+  confirmationRequired,
+  recordUserMessage,
+  sendConfirmationEmail,
+  sendPaymentScreenshot,
+} from "./billing.ts";
 
 const credentials = z.object({
   email: z
@@ -194,6 +204,11 @@ export function createApp(directory: string, production = false) {
     legacyHeaders: false,
   });
   const userOf = (res: Response) => res.locals.user as User;
+  const appOrigin = process.env.APP_ORIGIN || "http://localhost:4310";
+  const chargeMessage = (userId: string) => {
+    assertCanSend(db, userId);
+    recordUserMessage(db, userId);
+  };
   const startRunForUser = async (
     userId: string,
     input: {
@@ -263,6 +278,7 @@ export function createApp(directory: string, production = false) {
     }
     if (attachments.length > ATTACHMENT_MAX_FILES)
       throw new Error("A conversation can include up to four files.");
+    assertCanSend(db, userId);
     const run: Run = {
       attachments,
       id: randomUUID(),
@@ -287,6 +303,7 @@ export function createApp(directory: string, production = false) {
         : {}),
     };
     store.saveRun(userId, run);
+    recordUserMessage(db, userId);
     for (const id of input.attachmentIds || [])
       db.prepare("DELETE FROM attachments WHERE id=? AND user_id=?").run(
         id,
@@ -297,7 +314,13 @@ export function createApp(directory: string, production = false) {
       .catch((error) => console.error("Run failure:", error.message));
     return run;
   };
-  const telegram = new TelegramBridge(db, store, engine, startRunForUser);
+  const telegram = new TelegramBridge(
+    db,
+    store,
+    engine,
+    startRunForUser,
+    chargeMessage,
+  );
   telegram.startAll();
   const issueSession = (userId: string, kind: string) => {
     const token = randomBytes(32).toString("base64url");
@@ -326,8 +349,19 @@ export function createApp(directory: string, production = false) {
       signup: process.env.ALLOW_SIGNUP !== "false",
       inviteRequired: !!process.env.INVITE_CODE,
       mode: process.env.DEPLOYMENT_MODE || "local",
+      emailConfirmationRequired: confirmationRequired(),
     }),
   );
+  app.get("/api/auth/confirm", (req, res) => {
+    const token = z.string().min(20).max(200).parse(req.query.token);
+    const userId = confirmEmailToken(db, token);
+    if (!userId) {
+      res.status(400).send("Confirmation link is invalid or expired.");
+      return;
+    }
+    cookie(res, issueSession(userId, "cookie"));
+    res.redirect("/?confirmed=1");
+  });
   app.post("/api/auth/signup", authLimit, async (req, res) => {
     if (process.env.ALLOW_SIGNUP === "false") {
       res.status(403).json({ error: "Signup is closed." });
@@ -347,13 +381,20 @@ export function createApp(directory: string, production = false) {
       name: data.name || data.email.split("@")[0],
     };
     const hashed = await hashPassword(data.password);
+    const verified = confirmationRequired() ? 0 : 1;
     try {
-      db.prepare("INSERT INTO users VALUES(?,?,?,?,?)").run(
+      db.prepare(
+        "INSERT INTO users(id,email,name,password,created_at,email_verified,access_approved,free_messages_used,confirmed_at) VALUES(?,?,?,?,?,?,?,?,?)",
+      ).run(
         user.id,
         user.email,
         user.name,
         hashed,
         new Date().toISOString(),
+        verified,
+        0,
+        0,
+        verified ? new Date().toISOString() : null,
       );
     } catch {
       res
@@ -375,6 +416,15 @@ export function createApp(directory: string, production = false) {
       user.id,
       JSON.stringify(demo),
     );
+    const confirmation = await sendConfirmationEmail(db, user, appOrigin);
+    if (confirmation.required) {
+      res.status(201).json({
+        needsConfirmation: true,
+        message:
+          "Check your email and click the confirmation link to finish signup.",
+      });
+      return;
+    }
     cookie(res, issueSession(user.id, "cookie"));
     res.status(201).json({ user });
   });
@@ -392,9 +442,46 @@ export function createApp(directory: string, production = false) {
       res.status(401).json({ error: "Email or password is incorrect." });
       return;
     }
+    if (!row.email_verified) {
+      res.status(403).json({
+        error:
+          "Confirm your email address before signing in. Check your inbox for the Council confirmation link.",
+      });
+      return;
+    }
     const user = { id: row.id, email: row.email, name: row.name };
     cookie(res, issueSession(user.id, "cookie"));
     res.json({ user });
+  });
+  const admin = (req: Request, res: Response, next: NextFunction) => {
+    const token = req.headers.authorization?.startsWith("Bearer ")
+      ? req.headers.authorization.slice(7)
+      : "";
+    if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) {
+      res.status(404).json({ error: "Not found." });
+      return;
+    }
+    next();
+  };
+  app.get("/api/admin/users", admin, (_req, res) =>
+    res.json(
+      db
+        .prepare(
+          "SELECT id,email,name,created_at,email_verified,access_approved,free_messages_used FROM users ORDER BY created_at DESC LIMIT 500",
+        )
+        .all(),
+    ),
+  );
+  app.post("/api/admin/users/:id/approval", admin, (req, res) => {
+    const { approved } = z.object({ approved: z.boolean() }).parse(req.body);
+    const result = db
+      .prepare("UPDATE users SET access_approved=? WHERE id=?")
+      .run(approved ? 1 : 0, req.params.id as string);
+    if (!result.changes) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json({ ok: true });
   });
   app.use("/api", (req, res, next) => {
     const bearer = req.headers.authorization?.startsWith("Bearer ")
@@ -502,7 +589,42 @@ export function createApp(directory: string, production = false) {
     );
     res.json({ ok: true });
   });
-  app.get("/api/me", (_req, res) => res.json({ user: userOf(res) }));
+  app.get("/api/me", (_req, res) =>
+    res.json({ user: userOf(res), billing: accountStatus(db, userOf(res).id) }),
+  );
+  app.get("/api/billing", (_req, res) =>
+    res.json(accountStatus(db, userOf(res).id)),
+  );
+  app.post(
+    "/api/billing/payment",
+    express.raw({
+      type: ["image/png", "image/jpeg", "image/webp"],
+      limit: PAYMENT_SCREENSHOT_MAX_BYTES,
+    }),
+    async (req, res) => {
+      try {
+        const name = decodeURIComponent(
+          req.get("X-File-Name") || "payment-screenshot.png",
+        )
+          .replace(/[^\w .-]/g, "_")
+          .slice(0, 120);
+        const result = await sendPaymentScreenshot(
+          db,
+          userOf(res),
+          name || "payment-screenshot.png",
+          req.get("content-type") || "",
+          Buffer.isBuffer(req.body) ? req.body : Buffer.from([]),
+        );
+        res.status(201).json({
+          ...result,
+          message:
+            "Payment screenshot submitted. Your account will be reviewed within 24 hours.",
+        });
+      } catch (e) {
+        res.status(400).json({ error: (e as Error).message });
+      }
+    },
+  );
   app.get("/api/sandbox", async (_req, res) => {
     if (!process.env.COUNCIL_SANDBOX_SOCKET) {
       res.json({ available: false, active: false });
@@ -925,6 +1047,7 @@ export function createApp(directory: string, production = false) {
       });
       return;
     }
+    assertCanSend(db, userId);
     const run: Run = {
       attachments,
       id: randomUUID(),
@@ -974,6 +1097,7 @@ export function createApp(directory: string, production = false) {
         : {}),
     };
     store.saveRun(userId, run);
+    recordUserMessage(db, userId);
     for (const id of data.attachmentIds)
       db.prepare("DELETE FROM attachments WHERE id=? AND user_id=?").run(
         id,
@@ -1061,10 +1185,12 @@ export function createApp(directory: string, production = false) {
     const { content } = z
       .object({ content: z.string().trim().min(1).max(4000) })
       .parse(req.body);
+    assertCanSend(db, userOf(res).id);
     if (!engine.postBoard(userOf(res).id, run.id, content)) {
       res.status(409).json({ error: "This session is not currently running." });
       return;
     }
+    recordUserMessage(db, userOf(res).id);
     res.json({ ok: true });
   });
   app.post("/api/runs/:id/message", (req, res) => {
@@ -1079,11 +1205,13 @@ export function createApp(directory: string, production = false) {
         content: z.string().trim().min(1).max(4000),
       })
       .parse(req.body);
+    assertCanSend(db, userOf(res).id);
     const result = engine.sendUserMessage(userOf(res).id, run.id, to, content);
     if (!result.ok) {
       res.status(409).json({ error: result.error });
       return;
     }
+    recordUserMessage(db, userOf(res).id);
     res.json({ ok: true });
   });
   app.post("/api/runs/:id/goal", (req, res) => {
@@ -1099,6 +1227,7 @@ export function createApp(directory: string, production = false) {
         maxMinutes: z.number().int().min(1).max(180).optional(),
       })
       .parse(req.body);
+    assertCanSend(db, userOf(res).id);
     const result = engine.updateGoal(userOf(res).id, run.id, goal, {
       minMinutes,
       maxMinutes,
@@ -1107,6 +1236,7 @@ export function createApp(directory: string, production = false) {
       res.status(409).json({ error: result.error });
       return;
     }
+    recordUserMessage(db, userOf(res).id);
     res.json({ ok: true });
   });
   app.get("/api/runs/:id/events", (req, res) => {

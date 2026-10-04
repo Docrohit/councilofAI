@@ -34,6 +34,7 @@ import {
   Network,
   Plus,
   Radio,
+  ReceiptText,
   Search,
   Settings2,
   ShieldCheck,
@@ -85,6 +86,17 @@ const busy = (run?: Run | null) =>
   !!run && ["queued", "running"].includes(run.status);
 const clean = (text: string) =>
   text.replace(/```council[\s\S]*?(?:```|$)/g, "").trim();
+interface BillingStatus {
+  emailVerified: boolean;
+  accessApproved: boolean;
+  freeLimit: number;
+  freeUsed: number;
+  freeRemaining: number | null;
+  paymentSatoshis: number;
+  paymentEmail: string;
+  lightningWallet: string;
+  needsPayment: boolean;
+}
 function Mark({ small = false }: { small?: boolean }) {
   return (
     <span className={`mark ${small ? "small" : ""}`}>
@@ -138,8 +150,13 @@ function Modal({
 function Auth({ onUser }: { onUser: (user: User) => void }) {
   const [signup, setSignup] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
-  const [info, setInfo] = useState({ signup: true, inviteRequired: false });
+  const [info, setInfo] = useState({
+    signup: true,
+    inviteRequired: false,
+    emailConfirmationRequired: false,
+  });
   useEffect(() => {
     api("/info")
       .then(setInfo)
@@ -148,6 +165,7 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
+    setNotice("");
     setLoading(true);
     const values = Object.fromEntries(new FormData(e.currentTarget));
     try {
@@ -156,6 +174,14 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
         "POST",
         values,
       );
+      if (result.needsConfirmation) {
+        setNotice(
+          result.message ||
+            "Check your email and click the confirmation link to finish signup.",
+        );
+        setSignup(false);
+        return;
+      }
       onUser(result.user);
     } catch (e) {
       setError((e as Error).message);
@@ -263,6 +289,7 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
                 {error}
               </div>
             )}
+            {notice && <div className="success-note">{notice}</div>}
             <button className="primary auth-submit" disabled={loading}>
               {loading ? (
                 <LoaderCircle className="spin" size={18} />
@@ -281,6 +308,7 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
                 onClick={() => {
                   setSignup(!signup);
                   setError("");
+                  setNotice("");
                 }}
               >
                 {signup ? "Sign in" : "Create an account"}
@@ -288,7 +316,11 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
             </p>
           )}
           <div className="auth-note">
-            <ShieldCheck size={15} /> Private sessions · Bring your own models
+            <ShieldCheck size={15} />{" "}
+            {info.emailConfirmationRequired
+              ? "Email-confirmed workspaces"
+              : "Private sessions"}{" "}
+            · Bring your own models
           </div>
         </div>
       </div>
@@ -781,8 +813,118 @@ function TurnCard({ turn, index }: { turn: Turn; index: number }) {
   );
 }
 
+function BillingPanel({
+  status,
+  onRefresh,
+}: {
+  status: BillingStatus | null;
+  onRefresh: () => Promise<void>;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  async function upload() {
+    if (!file || busy) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/billing/payment", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": file.type,
+          "X-Council-Request": "1",
+          "X-File-Name": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || `Upload failed (${response.status})`);
+      setMessage(
+        data.message ||
+          "Payment screenshot submitted. Your account will be reviewed within 24 hours.",
+      );
+      setFile(null);
+      await onRefresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="settings-panel billing-panel">
+      <div className="settings-section">
+        <h3>Account access</h3>
+        <p className="muted">
+          The first {status?.freeLimit ?? 10} user or board messages are free.
+          After that, your account needs manual approval or a Lightning payment.
+        </p>
+        <div className="billing-grid">
+          <div>
+            <span className="field-help">Free messages used</span>
+            <b>
+              {status ? `${status.freeUsed}/${status.freeLimit}` : "Loading"}
+            </b>
+          </div>
+          <div>
+            <span className="field-help">Account status</span>
+            <b>{status?.accessApproved ? "Approved" : "Free tier"}</b>
+          </div>
+          <div>
+            <span className="field-help">Email</span>
+            <b>{status?.emailVerified ? "Confirmed" : "Pending"}</b>
+          </div>
+        </div>
+      </div>
+      <div className="settings-section">
+        <h3>Lightning payment</h3>
+        <p className="muted">
+          Pay {status?.paymentSatoshis?.toLocaleString("en-US") || "100,000"}{" "}
+          satoshis
+          {status?.lightningWallet ? ` to ${status.lightningWallet}` : ""}.
+          Then upload a screenshot. It will be emailed for manual review, and
+          approval should happen within 24 hours.
+        </p>
+        {!status?.lightningWallet && (
+          <div className="error">
+            Lightning wallet is not configured on the server yet.
+          </div>
+        )}
+        <label>
+          Payment screenshot
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
+        </label>
+        <div className="modal-actions">
+          <button className="quiet-button" type="button" onClick={onRefresh}>
+            Refresh
+          </button>
+          <button className="primary" disabled={!file || busy} onClick={upload}>
+            {busy ? "Uploading..." : "Upload screenshot"}
+          </button>
+        </div>
+        {error && <div className="error">{error}</div>}
+        {message && <div className="success-note">{message}</div>}
+        {status?.paymentEmail && (
+          <p className="field-help">
+            Screenshots are sent to {status.paymentEmail}.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [checking, setChecking] = useState(true);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -797,7 +939,14 @@ export default function App() {
   const [draftKey, setDraftKey] = useState(0);
   const [tab, setTab] = useState("discussion");
   const [modal, setModal] = useState<
-    "connections" | "team" | "files" | "cli" | "benchmarks" | "project" | null
+    | "connections"
+    | "team"
+    | "files"
+    | "cli"
+    | "benchmarks"
+    | "project"
+    | "billing"
+    | null
   >(null);
   const [sidebar, setSidebar] = useState(false);
   const [search, setSearch] = useState("");
@@ -811,10 +960,17 @@ export default function App() {
   const [streamError, setStreamError] = useState(false);
   useEffect(() => {
     api("/me")
-      .then((r) => setUser(r.user))
+      .then((r) => {
+        setUser(r.user);
+        setBilling(r.billing || null);
+      })
       .catch(() => {})
       .finally(() => setChecking(false));
   }, []);
+  async function loadBilling() {
+    const next = await api<BillingStatus>("/billing");
+    setBilling(next);
+  }
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -849,6 +1005,7 @@ export default function App() {
       api<Run[]>("/runs")
         .then(setRuns)
         .catch((e) => setError(e.message));
+      loadBilling().catch(() => {});
     }
   }, [user]);
   async function openRun(id: string) {
@@ -1004,6 +1161,7 @@ export default function App() {
       setPrompt("");
       setTab(next.status === "completed" ? "answer" : "discussion");
       setRuns((old) => [next, ...old]);
+      loadBilling().catch(() => {});
       follow.current = true;
     } catch (e) {
       setError((e as Error).message);
@@ -1096,6 +1254,7 @@ export default function App() {
       await api(`/runs/${run.id}/board`, "POST", { content: boardDraft });
       setBoardDraft("");
       setTab("board");
+      loadBilling().catch(() => {});
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1115,6 +1274,7 @@ export default function App() {
       });
       setBoardDraft("");
       setTab("board");
+      loadBilling().catch(() => {});
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1177,6 +1337,14 @@ export default function App() {
         </button>
         <button className="nav-button" onClick={() => setModal("files")}>
           <FileText size={16} /> Workspace files
+        </button>
+        <button className="nav-button" onClick={() => setModal("billing")}>
+          <ReceiptText size={16} /> Billing{" "}
+          {!billing?.accessApproved && (
+            <span className="count">
+              {billing ? `${billing.freeUsed}/${billing.freeLimit}` : ""}
+            </span>
+          )}
         </button>
         <div className="sidebar-label sessions-label">
           RECENT SESSIONS <span>{runs.length}</span>
@@ -1844,6 +2012,11 @@ export default function App() {
         />
       )}
       {modal === "files" && <Files close={() => setModal(null)} />}
+      {modal === "billing" && (
+        <Modal title="Billing" close={() => setModal(null)} wide>
+          <BillingPanel status={billing} onRefresh={loadBilling} />
+        </Modal>
+      )}
       {modal === "cli" && <CliModal close={() => setModal(null)} />}
       {modal === "benchmarks" && (
         <BenchmarkModal

@@ -290,6 +290,17 @@ fieldset {
   color: #c1dcb6;
   border: 1px solid #41563a;
 }
+.success-note {
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+  background: #283526;
+  color: #c1dcb6;
+  border: 1px solid #41563a;
+}
 .auth-page {
   min-height: 100dvh;
   max-width: 1600px;
@@ -1808,6 +1819,32 @@ fieldset {
   color: #80996c;
   line-height: 1.8;
   margin: 16px 0 0;
+}
+.billing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.billing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.billing-grid > div {
+  border: 1px solid #35432b;
+  border-radius: 7px;
+  padding: 12px;
+  background: #10160f;
+}
+.billing-grid b {
+  display: block;
+  margin-top: 5px;
+  font-size: 14px;
+}
+@media (max-width: 700px) {
+  .billing-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .member-editor {
   display: flex;

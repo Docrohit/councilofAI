@@ -9,7 +9,9 @@ const env = {
   NODE_ENV:'production', HOST:'127.0.0.1', PORT:'4310',
   DATA_DIR:'/var/lib/councilofai', DEPLOYMENT_MODE:'hosted',
   APP_ORIGIN:'https://councilofai.nftforger.com', COOKIE_SECURE:'true',
-  TRUST_PROXY:'1', ALLOW_SIGNUP:'true',
+  TRUST_PROXY:'1', ALLOW_SIGNUP:'true', EMAIL_CONFIRMATION_REQUIRED:'true',
+  BUSINESS_EMAIL:'cosmicwisdomyt@gmail.com', SMTP_FROM:'cosmicwisdomyt@gmail.com',
+  FREE_MESSAGE_LIMIT:'10', PAYMENT_SATOSHIS:'100000',
   COUNCIL_ENCRYPTION_KEY:randomBytes(32).toString('hex'),
   ...existing,
 };
@@ -17,6 +19,11 @@ const env = {
 for (const key of ['OPENAI_API_KEY','OPENAI_BASE_URL','OPENAI_IDEA_MODEL','OPENAI_CREATIVE_MODEL',
  'ANTHROPIC_API_KEY','ANTHROPIC_MODEL','GLM_API_KEY','GLM_MODEL','ZAI_API_KEY']) {
  if (!env[key] && source[key]) env[key] = source[key];
+}
+for (const key of ['SMTP_HOST','SMTP_PORT','SMTP_SECURE','SMTP_USER','SMTP_PASS','SMTP_FROM',
+ 'BUSINESS_EMAIL','ADMIN_TOKEN','FREE_MESSAGE_LIMIT','PAYMENT_SATOSHIS','LIGHTNING_WALLET',
+ 'EMAIL_CONFIRMATION_REQUIRED']) {
+ if (process.env[key]) env[key] = process.env[key];
 }
 // These keys are held server-side until explicitly provisioned to an owner's account.
 // Public signups never inherit them.

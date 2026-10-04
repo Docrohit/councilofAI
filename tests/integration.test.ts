@@ -191,6 +191,70 @@ test("signup, isolation, encrypted secrets, five agents on one model, disagreeme
     const token = await api("/auth/token", {}, alice.cookie);
     assert.equal(token.data.token.length > 30, true);
   }));
+test("free message limit blocks sends until backend approval", async () => {
+  const previousLimit = process.env.FREE_MESSAGE_LIMIT;
+  const previousAdmin = process.env.ADMIN_TOKEN;
+  process.env.FREE_MESSAGE_LIMIT = "1";
+  process.env.ADMIN_TOKEN = "fixture-admin-token";
+  try {
+    await harness(async ({ api, base, db }: any) => {
+      const signup = await api("/auth/signup", {
+        name: "Paying User",
+        email: "paying@example.test",
+        password: "long-password-789",
+      });
+      assert.equal(signup.status, 201);
+      const providers = await api("/providers", undefined, signup.cookie);
+      const id = providers.data[0].id;
+      const config = cfg([id], 1, {
+        concurrency: 1,
+        maxCalls: 4,
+      });
+      const first = await api(
+        "/runs",
+        { prompt: "hello", config },
+        signup.cookie,
+      );
+      assert.equal(first.status, 201, JSON.stringify(first.data));
+      if (["queued", "running"].includes(first.data.status))
+        await done(api, signup.cookie, first.data.id);
+      const blocked = await api(
+        "/runs",
+        { prompt: "hello again", config },
+        signup.cookie,
+      );
+      assert.equal(blocked.status, 400);
+      assert.match(blocked.data.error, /Free message limit reached/);
+      const userId = (
+        db.prepare("SELECT id FROM users WHERE email=?").get("paying@example.test") as any
+      ).id;
+      const approval = await fetch(
+        `${base}/api/admin/users/${userId}/approval`,
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer fixture-admin-token",
+            "content-type": "application/json",
+            "x-council-request": "1",
+          },
+          body: JSON.stringify({ approved: true }),
+        },
+      );
+      assert.equal(approval.status, 200);
+      const after = await api(
+        "/runs",
+        { prompt: "hello after approval", config },
+        signup.cookie,
+      );
+      assert.equal(after.status, 201, JSON.stringify(after.data));
+    });
+  } finally {
+    if (previousLimit === undefined) delete process.env.FREE_MESSAGE_LIMIT;
+    else process.env.FREE_MESSAGE_LIMIT = previousLimit;
+    if (previousAdmin === undefined) delete process.env.ADMIN_TOKEN;
+    else process.env.ADMIN_TOKEN = previousAdmin;
+  }
+});
 test("streaming delegation starts a specialist before parent response finishes", async () => {
   const model = createServer(async (req, res) => {
     let raw = "";
@@ -1522,7 +1586,7 @@ test("telegram new chat command detaches and stops the linked active session", a
       };
       const bridge = new TelegramBridge(db, store, engine, async () => {
         throw new Error("new chat should not start a run");
-      });
+      }, () => {});
       await (bridge as any).handleUpdate(user.id, "telegram-token", {
         update_id: 1,
         message: {

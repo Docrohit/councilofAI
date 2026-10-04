@@ -87,6 +87,7 @@ SMTP_PASS=your-google-app-password
 SMTP_FROM=cosmicwisdomyt@gmail.com
 BUSINESS_EMAIL=cosmicwisdomyt@gmail.com
 ADMIN_TOKEN=a-long-random-admin-token
+BILLING_ADMIN_EMAILS=cosmicwisdomyt@gmail.com,rohitsharma9000@gmail.com
 LIGHTNING_WALLET=your-lightning-invoice-or-address
 FREE_MESSAGE_LIMIT=10
 PAYMENT_SATOSHIS=100000
@@ -95,7 +96,12 @@ PAYMENT_SATOSHIS=100000
 Users get 10 free user/board messages by default. After that, the server blocks
 new user messages unless the account is approved. The Billing screen lets a user
 upload a PNG/JPG/WebP Lightning payment screenshot; the screenshot is emailed to
-`BUSINESS_EMAIL` for manual review. Approve an account from the backend with:
+`BUSINESS_EMAIL` for manual review and is stored server-side for review by
+billing admins. Signed-in users whose email appears in `BILLING_ADMIN_EMAILS`
+see **Approve paid users** in the app sidebar; approving a screenshot unlocks
+that account.
+
+Backend approval remains available with `ADMIN_TOKEN`:
 
 ```sh
 curl -X POST https://councilofai.nftforger.com/api/admin/users/USER_ID/approval \
@@ -103,6 +109,14 @@ curl -X POST https://councilofai.nftforger.com/api/admin/users/USER_ID/approval 
   -H "Content-Type: application/json" \
   -H "X-Council-Request: 1" \
   -d '{"approved":true}'
+```
+
+Hosted CLI users must sign in before using server-backed commands. They can also
+check or upload payment proof from the terminal:
+
+```sh
+npm run cli -- billing status
+npm run cli -- billing upload ./payment-screenshot.png
 ```
 
 ## Code with real project tools

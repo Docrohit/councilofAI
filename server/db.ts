@@ -22,7 +22,7 @@ export function openDb(directory: string) {
     CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), run_id TEXT NOT NULL REFERENCES runs(id), name TEXT NOT NULL, content TEXT NOT NULL, original TEXT, status TEXT NOT NULL DEFAULT 'pending');
     CREATE TABLE IF NOT EXISTS email_tokens(user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, hash TEXT PRIMARY KEY, purpose TEXT NOT NULL, expires INTEGER NOT NULL, created_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS email_token_owner ON email_tokens(user_id,purpose);
-    CREATE TABLE IF NOT EXISTS payment_submissions(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), file_name TEXT NOT NULL, mime TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, note TEXT NOT NULL DEFAULT '');
+    CREATE TABLE IF NOT EXISTS payment_submissions(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), file_name TEXT NOT NULL, mime TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', image BLOB);
     CREATE INDEX IF NOT EXISTS payment_owner ON payment_submissions(user_id,created_at);`);
   const columns = (
     db.prepare("PRAGMA table_info(users)").all() as { name: string }[]
@@ -41,6 +41,13 @@ export function openDb(directory: string) {
     );
   if (!columns.includes("confirmed_at"))
     db.exec("ALTER TABLE users ADD COLUMN confirmed_at TEXT");
+  const paymentColumns = (
+    db.prepare("PRAGMA table_info(payment_submissions)").all() as {
+      name: string;
+    }[]
+  ).map((c) => c.name);
+  if (!paymentColumns.includes("image"))
+    db.exec("ALTER TABLE payment_submissions ADD COLUMN image BLOB");
   return db;
 }
 export type DB = ReturnType<typeof openDb>;

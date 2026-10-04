@@ -41,9 +41,14 @@ import {
   assertCanSend,
   confirmEmailToken,
   confirmationRequired,
+  listPaymentSubmissions,
+  paymentSubmissions,
+  paymentImage,
   recordUserMessage,
+  reviewPaymentSubmission,
   sendConfirmationEmail,
   sendPaymentScreenshot,
+  isBillingAdmin,
 } from "./billing.ts";
 
 const credentials = z.object({
@@ -483,6 +488,22 @@ export function createApp(directory: string, production = false) {
     }
     res.json({ ok: true });
   });
+  app.get("/api/admin/payments", admin, (_req, res) =>
+    res.json(listPaymentSubmissions(db)),
+  );
+  app.post("/api/admin/payments/:id/review", admin, (req, res) => {
+    const { status, note } = z
+      .object({
+        status: z.enum(["approved", "rejected"]),
+        note: z.string().trim().max(1000).default(""),
+      })
+      .parse(req.body);
+    if (!reviewPaymentSubmission(db, req.params.id as string, status, note)) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json({ ok: true });
+  });
   app.use("/api", (req, res, next) => {
     const bearer = req.headers.authorization?.startsWith("Bearer ")
       ? req.headers.authorization.slice(7)
@@ -590,10 +611,51 @@ export function createApp(directory: string, production = false) {
     res.json({ ok: true });
   });
   app.get("/api/me", (_req, res) =>
-    res.json({ user: userOf(res), billing: accountStatus(db, userOf(res).id) }),
+    res.json({
+      user: userOf(res),
+      billing: accountStatus(db, userOf(res).id),
+      billingAdmin: isBillingAdmin(userOf(res).email),
+    }),
   );
+  const requireBillingAdmin = (res: Response) => {
+    if (isBillingAdmin(userOf(res).email)) return true;
+    res.status(404).json({ error: "Not found." });
+    return false;
+  };
+  app.get("/api/billing/admin/payments", (_req, res) => {
+    if (!requireBillingAdmin(res)) return;
+    res.json(listPaymentSubmissions(db));
+  });
+  app.get("/api/billing/admin/payments/:id/image", (req, res) => {
+    if (!requireBillingAdmin(res)) return;
+    const image = paymentImage(db, req.params.id as string);
+    if (!image?.image) {
+      res.sendStatus(404);
+      return;
+    }
+    res.setHeader("Content-Type", image.mime);
+    res.setHeader("Cache-Control", "no-store");
+    res.end(Buffer.from(image.image));
+  });
+  app.post("/api/billing/admin/payments/:id/review", (req, res) => {
+    if (!requireBillingAdmin(res)) return;
+    const { status, note } = z
+      .object({
+        status: z.enum(["approved", "rejected"]),
+        note: z.string().trim().max(1000).default(""),
+      })
+      .parse(req.body);
+    if (!reviewPaymentSubmission(db, req.params.id as string, status, note)) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json({ ok: true });
+  });
   app.get("/api/billing", (_req, res) =>
     res.json(accountStatus(db, userOf(res).id)),
+  );
+  app.get("/api/billing/payments", (_req, res) =>
+    res.json(paymentSubmissions(db, userOf(res).id)),
   );
   app.post(
     "/api/billing/payment",

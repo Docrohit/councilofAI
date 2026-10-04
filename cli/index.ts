@@ -83,6 +83,33 @@ async function api<T = any>(
   if (!result.ok) throw new Error(data.error || `HTTP ${result.status}`);
   return data;
 }
+async function uploadPaymentScreenshot(file: string) {
+  const data = readFileSync(file);
+  const ext = path.extname(file).toLowerCase();
+  const type =
+    ext === ".png"
+      ? "image/png"
+      : ext === ".jpg" || ext === ".jpeg"
+        ? "image/jpeg"
+        : ext === ".webp"
+          ? "image/webp"
+          : "";
+  if (!type) throw new Error("Upload a PNG, JPG, JPEG or WebP screenshot.");
+  const response = await fetch(base + "/api/billing/payment", {
+    method: "POST",
+    headers: {
+      "Content-Type": type,
+      "X-Council-Request": "1",
+      "X-File-Name": encodeURIComponent(path.basename(file)),
+      Authorization: `Bearer ${token}`,
+    },
+    body: data,
+    redirect: "error",
+  });
+  const result = (await response.json().catch(() => ({}))) as any;
+  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  return result;
+}
 function password(): Promise<string> {
   if (process.env.COUNCIL_PASSWORD)
     return Promise.resolve(process.env.COUNCIL_PASSWORD);
@@ -333,7 +360,7 @@ async function main() {
   }
   if (values.help) {
     console.log(
-      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n      [--max-output-tokens N] [--team FILE]\n  upgrade [--check] [--web]          Update a clean main installation; --web builds the web UI\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME] [--effort LEVEL]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--web]                      Enable public web research (search fees may apply)\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-output-tokens N]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
+      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n      [--max-output-tokens N] [--team FILE]\n  upgrade [--check] [--web]          Update a clean main installation; --web builds the web UI\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME] [--effort LEVEL]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--web]                      Enable public web research (search fees may apply)\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-output-tokens N]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  billing status                    Show account, quota and payment state\n  billing upload SCREENSHOT         Upload a Lightning payment screenshot\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
     );
     console.log(
       '\nGoal and channel commands:\n  telegram status|set|clear         Manage Telegram bot bridge\n  run "goal" --providers ID --goal  Start goal mode\n      [--min-goal-minutes 10] [--max-goal-minutes 180]',
@@ -547,6 +574,36 @@ async function main() {
     for (const p of providers)
       console.log(`${p.id}  ${p.name}  ${p.model}  ${p.transport}`);
     return;
+  }
+  if (command === "billing") {
+    const action = positionals[1] || "status";
+    if (action === "status") {
+      const status = await api<any>("/billing");
+      const payments = await api<any[]>("/billing/payments");
+      console.log(
+        [
+          `Account: ${status.accessApproved ? "approved" : status.needsPayment ? "payment needed" : "free tier"}`,
+          `Email: ${status.emailVerified ? "confirmed" : "pending"}`,
+          `Free messages: ${status.freeUsed}/${status.freeLimit}`,
+          `Payment: ${status.paymentSatoshis.toLocaleString("en-US")} satoshis`,
+          `Lightning wallet: ${status.lightningWallet || "not configured"}`,
+          payments.length ? "Submissions:" : "Submissions: none",
+          ...payments.map(
+            (p) =>
+              `- ${p.status}  ${p.fileName}  ${new Date(p.createdAt).toLocaleString()}${p.note ? `  ${p.note}` : ""}`,
+          ),
+        ].join("\n"),
+      );
+      return;
+    }
+    if (action === "upload") {
+      const file = positionals[2];
+      if (!file) throw new Error("Use billing upload SCREENSHOT");
+      const result = await uploadPaymentScreenshot(file);
+      console.log(result.message || "Payment screenshot uploaded.");
+      return;
+    }
+    throw new Error("Use billing status or billing upload SCREENSHOT.");
   }
   if (command === "telegram") {
     const action = positionals[1] || "status";

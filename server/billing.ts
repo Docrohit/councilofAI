@@ -11,11 +11,20 @@ export interface AccountStatus {
   accessApproved: boolean;
   freeLimit: number;
   freeUsed: number;
-  freeRemaining: number;
+  freeRemaining: number | null;
   paymentSatoshis: number;
   paymentEmail: string;
   lightningWallet: string;
   needsPayment: boolean;
+}
+export interface PaymentSubmission {
+  id: string;
+  userId: string;
+  fileName: string;
+  mime: string;
+  status: "submitted" | "approved" | "rejected";
+  createdAt: string;
+  note: string;
 }
 
 export function businessEmail() {
@@ -43,13 +52,30 @@ export function lightningWallet() {
   return process.env.LIGHTNING_WALLET || "";
 }
 
+export function billingAdminEmails() {
+  return new Set(
+    (
+      process.env.BILLING_ADMIN_EMAILS ||
+      "cosmicwisdomyt@gmail.com,rohitsharma9000@gmail.com"
+    )
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+export function isBillingAdmin(email: string) {
+  return billingAdminEmails().has(email.toLowerCase());
+}
+
 export function accountStatus(db: DB, userId: string): AccountStatus {
   const row = db
     .prepare(
-      "SELECT email_verified,access_approved,free_messages_used FROM users WHERE id=?",
+      "SELECT email,email_verified,access_approved,free_messages_used FROM users WHERE id=?",
     )
     .get(userId) as
     | {
+        email: string;
         email_verified: number;
         access_approved: number;
         free_messages_used: number;
@@ -57,18 +83,75 @@ export function accountStatus(db: DB, userId: string): AccountStatus {
     | undefined;
   const limit = freeLimit();
   const used = Math.max(0, Number(row?.free_messages_used || 0));
-  const approved = !!row?.access_approved;
+  const approved = !!row?.access_approved || !!(row && isBillingAdmin(row.email));
   return {
     emailVerified: !!row?.email_verified,
     accessApproved: approved,
     freeLimit: limit,
     freeUsed: used,
-    freeRemaining: approved ? Number.POSITIVE_INFINITY : Math.max(0, limit - used),
+    freeRemaining: approved ? null : Math.max(0, limit - used),
     paymentSatoshis: paymentSatoshis(),
     paymentEmail: businessEmail(),
     lightningWallet: lightningWallet(),
     needsPayment: !approved && used >= limit,
   };
+}
+
+export function paymentSubmissions(db: DB, userId: string): PaymentSubmission[] {
+  return (
+    db
+      .prepare(
+        "SELECT id,user_id,file_name,mime,status,created_at,note FROM payment_submissions WHERE user_id=? ORDER BY created_at DESC LIMIT 20",
+      )
+      .all(userId) as any[]
+  ).map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    fileName: row.file_name,
+    mime: row.mime,
+    status: row.status,
+    createdAt: row.created_at,
+    note: row.note,
+  }));
+}
+
+export function listPaymentSubmissions(db: DB) {
+  return db
+    .prepare(
+      `SELECT p.id,p.user_id AS userId,p.file_name AS fileName,p.mime,p.status,p.created_at AS createdAt,p.note,
+              u.email,u.name,u.access_approved AS accessApproved,u.free_messages_used AS freeUsed
+       FROM payment_submissions p
+       JOIN users u ON u.id=p.user_id
+       ORDER BY p.created_at DESC
+       LIMIT 500`,
+    )
+    .all();
+}
+
+export function paymentImage(db: DB, id: string) {
+  return db
+    .prepare("SELECT mime,image FROM payment_submissions WHERE id=?")
+    .get(id) as { mime: string; image: Buffer | Uint8Array | null } | undefined;
+}
+
+export function reviewPaymentSubmission(
+  db: DB,
+  id: string,
+  status: "approved" | "rejected",
+  note = "",
+) {
+  const row = db
+    .prepare("SELECT user_id FROM payment_submissions WHERE id=?")
+    .get(id) as { user_id: string } | undefined;
+  if (!row) return false;
+  db.prepare("UPDATE payment_submissions SET status=?,note=? WHERE id=?").run(
+    status,
+    note,
+    id,
+  );
+  if (status === "approved")
+    db.prepare("UPDATE users SET access_approved=1 WHERE id=?").run(row.user_id);
+  return true;
 }
 
 export function assertCanSend(db: DB, userId: string) {
@@ -183,8 +266,17 @@ export async function sendPaymentScreenshot(
     throw new Error("Payment screenshot must be 8 MB or smaller.");
   const id = randomUUID();
   db.prepare(
-    "INSERT INTO payment_submissions(id,user_id,file_name,mime,status,created_at,note) VALUES(?,?,?,?,?,?,?)",
-  ).run(id, user.id, fileName, mime, "submitted", new Date().toISOString(), "");
+    "INSERT INTO payment_submissions(id,user_id,file_name,mime,status,created_at,note,image) VALUES(?,?,?,?,?,?,?,?)",
+  ).run(
+    id,
+    user.id,
+    fileName,
+    mime,
+    "submitted",
+    new Date().toISOString(),
+    "",
+    data,
+  );
   await transport().sendMail({
     from: process.env.SMTP_FROM || businessEmail(),
     to: businessEmail(),

@@ -1841,9 +1841,79 @@ fieldset {
   margin-top: 5px;
   font-size: 14px;
 }
+.payment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.payment-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #35432b;
+  border-radius: 7px;
+  padding: 12px;
+  background: #10160f;
+}
+.payment-row > div {
+  min-width: 0;
+}
+.payment-row b,
+.payment-row p {
+  overflow-wrap: anywhere;
+}
+.payment-approved {
+  border-color: #567342;
+  color: #c1dcb6;
+}
+.payment-rejected {
+  border-color: #74483d;
+  color: #e9b4a7;
+}
+.admin-payment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.admin-payment-card {
+  border: 1px solid #35432b;
+  border-radius: 7px;
+  padding: 14px;
+  background: #10160f;
+}
+.admin-payment-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.admin-payment-main > div {
+  min-width: 0;
+}
+.admin-payment-main b,
+.admin-payment-main p {
+  overflow-wrap: anywhere;
+}
+.admin-payment-card img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border: 1px solid #2e3a28;
+  border-radius: 6px;
+  background: #050705;
+  margin: 12px 0;
+}
 @media (max-width: 700px) {
   .billing-grid {
     grid-template-columns: 1fr;
+  }
+  .payment-row {
+    flex-direction: column;
+  }
+  .admin-payment-main {
+    flex-direction: column;
   }
 }
 .member-editor {

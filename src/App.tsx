@@ -97,6 +97,21 @@ interface BillingStatus {
   lightningWallet: string;
   needsPayment: boolean;
 }
+interface PaymentSubmission {
+  id: string;
+  userId: string;
+  fileName: string;
+  mime: string;
+  status: "submitted" | "approved" | "rejected";
+  createdAt: string;
+  note: string;
+}
+interface AdminPaymentSubmission extends PaymentSubmission {
+  email: string;
+  name: string;
+  accessApproved: number;
+  freeUsed: number;
+}
 function Mark({ small = false }: { small?: boolean }) {
   return (
     <span className={`mark ${small ? "small" : ""}`}>
@@ -821,9 +836,18 @@ function BillingPanel({
   onRefresh: () => Promise<void>;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  const [payments, setPayments] = useState<PaymentSubmission[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  async function refreshAll() {
+    await onRefresh();
+    const rows = await api<PaymentSubmission[]>("/billing/payments");
+    setPayments(rows);
+  }
+  useEffect(() => {
+    refreshAll().catch((e) => setError((e as Error).message));
+  }, []);
   async function upload() {
     if (!file || busy) return;
     setBusy(true);
@@ -848,7 +872,7 @@ function BillingPanel({
           "Payment screenshot submitted. Your account will be reviewed within 24 hours.",
       );
       setFile(null);
-      await onRefresh();
+      await refreshAll();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -872,7 +896,13 @@ function BillingPanel({
           </div>
           <div>
             <span className="field-help">Account status</span>
-            <b>{status?.accessApproved ? "Approved" : "Free tier"}</b>
+            <b>
+              {status?.accessApproved
+                ? "Approved"
+                : status?.needsPayment
+                  ? "Payment needed"
+                  : "Free tier"}
+            </b>
           </div>
           <div>
             <span className="field-help">Email</span>
@@ -903,7 +933,7 @@ function BillingPanel({
           />
         </label>
         <div className="modal-actions">
-          <button className="quiet-button" type="button" onClick={onRefresh}>
+          <button className="quiet-button" type="button" onClick={refreshAll}>
             Refresh
           </button>
           <button className="primary" disabled={!file || busy} onClick={upload}>
@@ -918,6 +948,132 @@ function BillingPanel({
           </p>
         )}
       </div>
+      <div className="settings-section">
+        <h3>Payment submissions</h3>
+        {payments.length ? (
+          <div className="payment-list">
+            {payments.map((payment) => (
+              <div className="payment-row" key={payment.id}>
+                <div>
+                  <b>{payment.fileName}</b>
+                  <span className="field-help">
+                    {new Date(payment.createdAt).toLocaleString()} ·{" "}
+                    {payment.mime}
+                  </span>
+                  {payment.note && <p>{payment.note}</p>}
+                </div>
+                <span className={`tiny-tag payment-${payment.status}`}>
+                  {payment.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No payment screenshots uploaded yet.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ApprovePaidUsers() {
+  const [payments, setPayments] = useState<AdminPaymentSubmission[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [note, setNote] = useState<Record<string, string>>({});
+  async function refresh() {
+    setPayments(await api<AdminPaymentSubmission[]>("/billing/admin/payments"));
+  }
+  useEffect(() => {
+    refresh().catch((e) => setError((e as Error).message));
+  }, []);
+  async function review(id: string, status: "approved" | "rejected") {
+    setBusy(id);
+    setError("");
+    try {
+      await api(`/billing/admin/payments/${id}/review`, "POST", {
+        status,
+        note: note[id] || "",
+      });
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  return (
+    <div className="settings-panel billing-panel">
+      <div className="settings-section">
+        <h3>Approve paid users</h3>
+        <p className="muted">
+          Review Lightning payment screenshots. Approving a submission unlocks
+          that user account.
+        </p>
+        <div className="modal-actions">
+          <button className="quiet-button" onClick={refresh}>
+            Refresh
+          </button>
+        </div>
+        {error && <div className="error">{error}</div>}
+        {payments.length ? (
+          <div className="admin-payment-list">
+            {payments.map((payment) => (
+              <article className="admin-payment-card" key={payment.id}>
+                <div className="admin-payment-main">
+                  <div>
+                    <b>{payment.email}</b>
+                    <span className="field-help">
+                      {payment.name} · free messages {payment.freeUsed} ·{" "}
+                      {payment.accessApproved ? "approved" : "not approved"}
+                    </span>
+                    <span className="field-help">
+                      {payment.fileName} ·{" "}
+                      {new Date(payment.createdAt).toLocaleString()}
+                    </span>
+                    {payment.note && <p>{payment.note}</p>}
+                  </div>
+                  <span className={`tiny-tag payment-${payment.status}`}>
+                    {payment.status}
+                  </span>
+                </div>
+                <img
+                  alt={`Payment screenshot for ${payment.email}`}
+                  src={`/api/billing/admin/payments/${payment.id}/image`}
+                />
+                <label>
+                  Review note
+                  <input
+                    value={note[payment.id] || ""}
+                    onChange={(e) =>
+                      setNote({ ...note, [payment.id]: e.target.value })
+                    }
+                    placeholder="Optional note"
+                  />
+                </label>
+                <div className="modal-actions">
+                  <button
+                    className="quiet-button"
+                    disabled={busy === payment.id}
+                    onClick={() => review(payment.id, "rejected")}
+                  >
+                    Reject
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={busy === payment.id}
+                    onClick={() => review(payment.id, "approved")}
+                  >
+                    Approve user
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No payment screenshots submitted yet.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -925,6 +1081,7 @@ function BillingPanel({
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [billingAdmin, setBillingAdmin] = useState(false);
   const [checking, setChecking] = useState(true);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -946,6 +1103,7 @@ export default function App() {
     | "benchmarks"
     | "project"
     | "billing"
+    | "billingAdmin"
     | null
   >(null);
   const [sidebar, setSidebar] = useState(false);
@@ -963,6 +1121,7 @@ export default function App() {
       .then((r) => {
         setUser(r.user);
         setBilling(r.billing || null);
+        setBillingAdmin(!!r.billingAdmin);
       })
       .catch(() => {})
       .finally(() => setChecking(false));
@@ -1346,6 +1505,14 @@ export default function App() {
             </span>
           )}
         </button>
+        {billingAdmin && (
+          <button
+            className="nav-button"
+            onClick={() => setModal("billingAdmin")}
+          >
+            <ShieldCheck size={16} /> Approve paid users
+          </button>
+        )}
         <div className="sidebar-label sessions-label">
           RECENT SESSIONS <span>{runs.length}</span>
         </div>
@@ -2015,6 +2182,11 @@ export default function App() {
       {modal === "billing" && (
         <Modal title="Billing" close={() => setModal(null)} wide>
           <BillingPanel status={billing} onRefresh={loadBilling} />
+        </Modal>
+      )}
+      {modal === "billingAdmin" && (
+        <Modal title="Approve paid users" close={() => setModal(null)} wide>
+          <ApprovePaidUsers />
         </Modal>
       )}
       {modal === "cli" && <CliModal close={() => setModal(null)} />}

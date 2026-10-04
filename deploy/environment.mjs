@@ -11,6 +11,7 @@ const env = {
   APP_ORIGIN:'https://councilofai.nftforger.com', COOKIE_SECURE:'true',
   TRUST_PROXY:'1', ALLOW_SIGNUP:'true', EMAIL_CONFIRMATION_REQUIRED:'true',
   BUSINESS_EMAIL:'cosmicwisdomyt@gmail.com', SMTP_FROM:'cosmicwisdomyt@gmail.com',
+  BILLING_ADMIN_EMAILS:'cosmicwisdomyt@gmail.com,rohitsharma9000@gmail.com',
   FREE_MESSAGE_LIMIT:'10', PAYMENT_SATOSHIS:'100000',
   COUNCIL_ENCRYPTION_KEY:randomBytes(32).toString('hex'),
   ...existing,
@@ -21,7 +22,7 @@ for (const key of ['OPENAI_API_KEY','OPENAI_BASE_URL','OPENAI_IDEA_MODEL','OPENA
  if (!env[key] && source[key]) env[key] = source[key];
 }
 for (const key of ['SMTP_HOST','SMTP_PORT','SMTP_SECURE','SMTP_USER','SMTP_PASS','SMTP_FROM',
- 'BUSINESS_EMAIL','ADMIN_TOKEN','FREE_MESSAGE_LIMIT','PAYMENT_SATOSHIS','LIGHTNING_WALLET',
+ 'BUSINESS_EMAIL','BILLING_ADMIN_EMAILS','ADMIN_TOKEN','FREE_MESSAGE_LIMIT','PAYMENT_SATOSHIS','LIGHTNING_WALLET',
  'EMAIL_CONFIRMATION_REQUIRED']) {
  if (process.env[key]) env[key] = process.env[key];
 }

@@ -255,6 +255,59 @@ test("free message limit blocks sends until backend approval", async () => {
     else process.env.ADMIN_TOKEN = previousAdmin;
   }
 });
+test("billing admin can review screenshot and approve paid users", async () =>
+  harness(async ({ api, base, db }: any) => {
+    const admin = await api("/auth/signup", {
+      name: "Admin",
+      email: "cosmicwisdomyt@gmail.com",
+      password: "long-password-admin",
+    });
+    const user = await api("/auth/signup", {
+      name: "Paid User",
+      email: "paid-user@example.test",
+      password: "long-password-user",
+    });
+    assert.equal(admin.status, 201);
+    assert.equal(user.status, 201);
+    const me = await api("/me", undefined, admin.cookie);
+    assert.equal(me.data.billingAdmin, true);
+    const userId = (
+      db.prepare("SELECT id FROM users WHERE email=?").get("paid-user@example.test") as any
+    ).id;
+    db.prepare(
+      "INSERT INTO payment_submissions(id,user_id,file_name,mime,status,created_at,note,image) VALUES(?,?,?,?,?,?,?,?)",
+    ).run(
+      "payment-1",
+      userId,
+      "proof.png",
+      "image/png",
+      "submitted",
+      new Date().toISOString(),
+      "",
+      Buffer.from("image-bytes"),
+    );
+    const denied = await api("/billing/admin/payments", undefined, user.cookie);
+    assert.equal(denied.status, 404);
+    const payments = await api("/billing/admin/payments", undefined, admin.cookie);
+    assert.equal(payments.status, 200);
+    assert.equal(payments.data[0].email, "paid-user@example.test");
+    const image = await fetch(
+      `${base}/api/billing/admin/payments/payment-1/image`,
+      { headers: { cookie: admin.cookie } },
+    );
+    assert.equal(image.status, 200);
+    assert.equal(await image.text(), "image-bytes");
+    const review = await api(
+      "/billing/admin/payments/payment-1/review",
+      { status: "approved", note: "verified" },
+      admin.cookie,
+    );
+    assert.equal(review.status, 200);
+    const approved = db
+      .prepare("SELECT access_approved FROM users WHERE id=?")
+      .get(userId) as any;
+    assert.equal(approved.access_approved, 1);
+  }));
 test("streaming delegation starts a specialist before parent response finishes", async () => {
   const model = createServer(async (req, res) => {
     let raw = "";

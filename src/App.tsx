@@ -261,7 +261,7 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
         <span className="brand">
           <Mark small /> council<span className="beta">preview</span>
         </span>
-        <span className="muted">Independent minds. Shared understanding.</span>
+        <span className="muted">Made for difficult tasks.</span>
       </header>
       <div className="auth-content">
         <div className="auth-story">
@@ -269,12 +269,14 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
             <span className="status-dot" /> YOUR MODELS, WORKING TOGETHER
           </div>
           <h1>
-            One goal.
-            <br />A team of <em>minds.</em>
+            Made for
+            <br />
+            <em>difficult tasks.</em>
           </h1>
           <p>
-            Give your models a shared workspace. Watch them exchange findings,
-            challenge assumptions, and work toward a better answer.
+            Smaller models can do bigger things as a team. Council gives them a
+            shared board where they research, deduce, gather evidence,
+            challenge each other, and work toward the best answer.
           </p>
           <div className="orbit">
             <div className="orbit-line" />
@@ -1776,17 +1778,18 @@ export default function App() {
             {!run ? (
               <div className="welcome">
                 <div className="welcome-eyebrow">
-                  <span className="status-dot" /> COLLABORATIVE INTELLIGENCE
+                  <span className="status-dot" /> MADE FOR DIFFICULT TASKS
                 </div>
                 <h1>
-                  One goal.
+                  Smaller models
                   <br />
-                  <span>More perspectives.</span>
+                  <span>can do bigger things.</span>
                 </h1>
                 <p>
-                  Bring your models to the same table.
+                  Give Council a hard goal.
                   <br />
-                  Let them explore, challenge, and build an answer together.
+                  Your agents research, deduce, verify evidence, update the
+                  board, and converge on the strongest answer.
                 </p>
                 <div className="welcome-team">
                   <div className="stacked-avatars">
@@ -1812,26 +1815,33 @@ export default function App() {
                   {[
                     {
                       icon: <GitBranch size={18} />,
-                      title: "Think through a system",
+                      title: "Build or fix something hard",
+                      description:
+                        "Plan, code, test, and challenge the implementation path.",
                       prompt:
                         "Help me design a multi-model collaboration system. Challenge the architecture, identify tradeoffs, and propose a practical implementation.",
                     },
                     {
                       icon: <ShieldCheck size={18} />,
-                      title: "Challenge an idea",
+                      title: "Deduce the best answer",
+                      description:
+                        "Compare arguments, demand evidence, and resolve uncertainty.",
                       prompt:
                         "I want to launch a small software product. Help me define a useful validation process. Debate assumptions and identify the strongest evidence to gather.",
                     },
                     {
                       icon: <Search size={18} />,
-                      title: "Understand the full picture",
+                      title: "Research the full picture",
+                      description:
+                        "Search, summarize, debate, and turn findings into a clear answer.",
                       prompt:
                         "Compare centralized and peer-to-peer agent orchestration. Explore strengths, limitations, and conditions where each works best.",
                     },
                   ].map((s) => (
                     <button key={s.title} onClick={() => setPrompt(s.prompt)}>
                       {s.icon}
-                      <span>{s.title}</span>
+                      <span className="suggestion-title">{s.title}</span>
+                      <small>{s.description}</small>
                       <ArrowUpRight size={14} />
                     </button>
                   ))}

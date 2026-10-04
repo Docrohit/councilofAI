@@ -341,7 +341,7 @@ fieldset {
   color: var(--green);
 }
 .auth-story > p {
-  max-width: 390px;
+  max-width: 470px;
   font-size: 15px;
   line-height: 1.8;
   color: #929b8c;
@@ -712,7 +712,7 @@ fieldset {
   position: relative;
 }
 .welcome {
-  max-width: 780px;
+  max-width: 830px;
   width: 100%;
   margin: auto;
   padding: 50px 50px 36px;
@@ -737,7 +737,8 @@ fieldset {
   color: #9eae90;
 }
 .welcome > p {
-  font-size: 13px;
+  max-width: 650px;
+  font-size: 14px;
   color: #8c9980;
   line-height: 1.8;
   margin-bottom: 24px;
@@ -803,24 +804,31 @@ fieldset {
   display: flex;
   align-items: flex-start;
   flex-direction: column;
-  gap: 16px;
+  gap: 9px;
   text-align: left;
   border: 1px solid #323b2c;
   border-radius: 8px;
   background: #1c2119;
   position: relative;
-  min-height: 94px;
+  min-height: 124px;
   color: #9aa98a;
 }
 .suggestions button:hover {
   background: #252d1e;
   border-color: #536247;
 }
-.suggestions button > span {
+.suggestions .suggestion-title {
   font-size: 10px;
   color: #b1bfa1;
-  line-height: 1.5;
-  padding-right: 8px;
+  line-height: 1.45;
+  padding-right: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.suggestions small {
+  color: #89977b;
+  font-size: 12px;
+  line-height: 1.55;
 }
 .suggestions button > svg:last-child {
   position: absolute;
@@ -2213,11 +2221,14 @@ fieldset {
   }
   .suggestions button {
     min-height: 0;
-    padding: 12px 10px;
+    padding: 13px 11px;
     gap: 9px;
   }
-  .suggestions button > span {
+  .suggestions .suggestion-title {
     font-size: 9px;
+  }
+  .suggestions small {
+    font-size: 11px;
   }
   .suggestions button > svg:last-child {
     display: none;
@@ -2505,9 +2516,6 @@ fieldset {
   .auth-footer {
     font-size: 9px;
     gap: 15px;
-  }
-  .auth-story h1 br {
-    display: none;
   }
   .page-error {
     margin: 8px 12px;

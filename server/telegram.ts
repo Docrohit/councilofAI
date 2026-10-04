@@ -194,9 +194,10 @@ export class TelegramBridge {
     while (!signal.aborted) {
       const row = this.row(userId);
       if (!row || row.id !== id) return;
-      const token = this.store.secrets.decrypt(row.secret);
       const config = JSON.parse(row.config) as TelegramConfig;
+      let token = "";
       try {
+        token = this.store.secrets.decrypt(row.secret);
         const result = await this.call(
           token,
           "getUpdates",
@@ -216,8 +217,21 @@ export class TelegramBridge {
         }
       } catch (error) {
         if (signal.aborted) return;
+        const message = (error as Error).message.slice(0, 400);
+        if (!token) {
+          this.db
+            .prepare("UPDATE integrations SET secret='' WHERE id=?")
+            .run(row.id);
+          this.saveConfig(userId, (next) => {
+            next.enabled = false;
+            next.lastError =
+              "Telegram token could not be decrypted. Paste the bot token again to reconnect.";
+          });
+          this.loops.delete(id);
+          return;
+        }
         this.saveConfig(userId, (next) => {
-          next.lastError = (error as Error).message.slice(0, 400);
+          next.lastError = message;
         });
         await sleep(5000);
       }

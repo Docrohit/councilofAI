@@ -1630,6 +1630,47 @@ test("telegram bridge token can be saved encrypted and reported without disclosu
     }
   }));
 
+test("telegram bridge disables stale encrypted tokens without crashing", async () =>
+  harness(async ({ api, db, store, engine }: any) => {
+    const auth = await api("/auth/signup", {
+      email: "telegram-stale-token@example.test",
+      password: "long-password-123",
+    });
+    const user = db
+      .prepare("SELECT id FROM users WHERE email=?")
+      .get("telegram-stale-token@example.test") as any;
+    db.prepare(
+      "INSERT INTO integrations(id,user_id,kind,config,secret) VALUES(?,?,?,?,?)",
+    ).run(
+      "tg-stale-token",
+      user.id,
+      "telegram",
+      JSON.stringify({ enabled: true, chats: {} }),
+      "not.decryptable",
+    );
+    const bridge = new TelegramBridge(
+      db,
+      store,
+      engine,
+      async () => {
+        throw new Error("stale token should not start a run");
+      },
+      () => {},
+    );
+    bridge.restart(user.id);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const row = db
+      .prepare(
+        "SELECT config,secret FROM integrations WHERE user_id=? AND kind='telegram'",
+      )
+      .get(user.id) as any;
+    const config = JSON.parse(row.config);
+    assert.equal(config.enabled, false);
+    assert.match(config.lastError, /Paste the bot token again/);
+    assert.equal(row.secret, "");
+    assert.equal(auth.status, 201);
+  }));
+
 test("telegram new chat command detaches and stops the linked active session", async () =>
   harness(async ({ api, db, store, engine }: any) => {
     const originalFetch = globalThis.fetch;

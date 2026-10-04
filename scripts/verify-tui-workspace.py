@@ -79,8 +79,8 @@ try:
     frame=seen.split(b'\x1b[H')[-1].split(b'\x1b[J')[0]
     assert frame.count(b'\n') < 36
     send('gpt-5.3-codex\x1b[Z')
-    # fields: ID, model, base URL, API key, optional environment name. Secret is pasted literally.
-    send('\x15codex\t\t\t')
+    # fields: ID, model, base URL, effort, API key, optional environment name. Secret is pasted literally.
+    send('\x15codex\t\t\t\t')
     wait_for('API key (paste here; masked)')
     send('\t\x1b[200~sk-proj-mistaken-fixture-value\x1b[201~');wait_for('Use a variable NAME')
     assert b'sk-proj-mistaken-fixture-value' not in transcript

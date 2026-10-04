@@ -39,6 +39,12 @@ that their infrastructure is implemented or live.
 - [Hosting](HOSTING.md): installation and existing release mechanics.
 - [OpenCode review](OPENCODE_REVIEW.md): reference-product observations and boundaries.
 
+## Recent handoffs and release notes
+
+- [2026-10-04 commit log](handoffs/2026-10-04-commit-log.md): Telegram,
+  model/reasoning, billing, password reset, image delivery and Kite refresh
+  commits from the Oct 4 hosted release work.
+
 ## Status and maintenance
 
 The owner confirmed independent AI review before staging and explicit approval

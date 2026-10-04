@@ -401,14 +401,12 @@ export async function startTui(options: TuiOptions) {
           : row(visible[i] || ""),
       ),
       row(dialog?.error || notice),
-      row(topBorder + "─".repeat(Math.max(0, width - topBorder.length - 1)) + "┐"),
+      row(
+        topBorder + "─".repeat(Math.max(0, width - topBorder.length - 1)) + "┐",
+      ),
       ...Array.from(
         { length: inputRows },
-        (_, i) =>
-          row(
-            "│ " + inputLine(i),
-            width - 1,
-          ) + "│",
+        (_, i) => row("│ " + inputLine(i), width - 1) + "│",
       ),
       row(
         bottomBorder +
@@ -639,6 +637,18 @@ export async function startTui(options: TuiOptions) {
         hint: "For vLLM, include /v1. Endpoint changes clear saved keys AND environment bindings; re-enter a key below or rebind after saving.",
       },
       {
+        label: "Reasoning effort (optional)",
+        value: existing?.reasoningEffort || "",
+        hint: "Use provider-supported levels such as low, medium, high, xhigh or max. Leave blank for provider default.",
+        validate: (value: string) =>
+          !value ||
+          ["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
+            value,
+          )
+            ? undefined
+            : "Use none, minimal, low, medium, high, xhigh, max, or leave blank.",
+      },
+      {
         label: "API key (paste here; masked)",
         value: "",
         secret: true,
@@ -661,8 +671,8 @@ export async function startTui(options: TuiOptions) {
       `Connection · ${kind}`,
       [],
       () => {
-        const [id, model, baseUrl, key, keyEnv] = fields.map((f) =>
-          f.value.trim(),
+        const [id, model, baseUrl, reasoningEffort, key, keyEnv] = fields.map(
+          (f) => f.value.trim(),
         );
         if (existing && existing.id !== id)
           throw new Error(
@@ -676,11 +686,18 @@ export async function startTui(options: TuiOptions) {
         if (!model || model.length > 200)
           throw new Error("Enter the exact model ID (1–200 characters).");
         if (!baseUrl) throw new Error("Enter the model server's base URL.");
-        saveModel({ id, kind, model, baseUrl, keyEnv: keyEnv || undefined });
+        saveModel({
+          id,
+          kind,
+          model,
+          baseUrl,
+          reasoningEffort: reasoningEffort || undefined,
+          keyEnv: keyEnv || undefined,
+        });
         if (key) saveNativeKey(nativeConfigDirectory(), id, key);
         const ids = [...new Set([...(config?.providerIds || []), id])];
         configure(ids);
-        fields[3].value = "";
+        fields[4].value = "";
         dialog = undefined;
         notice =
           existing && (existing.baseUrl !== baseUrl || existing.kind !== kind)
@@ -816,17 +833,18 @@ export async function startTui(options: TuiOptions) {
       return;
     }
     if (cmd === "connect") {
-      const [id, kind, model, url, keyEnv] = words;
+      const [id, kind, model, url, keyEnv, effort] = words;
       const defaults = nativeDefaults[kind];
       if (!id || !model || !defaults)
         throw new Error(
-          "Use /connect ID KIND MODEL [URL] [KEY_ENV]. Kinds: openai, anthropic, glm, ollama, vllm, compatible.",
+          "Use /connect ID KIND MODEL [URL] [KEY_ENV] [EFFORT]. Kinds: openai, anthropic, glm, ollama, vllm, compatible.",
         );
       const saved = saveModel({
         id,
         kind,
         model,
         baseUrl: url || defaults.url,
+        reasoningEffort: effort || undefined,
         keyEnv: keyEnv || defaults.keyEnv,
       });
       configure();
@@ -917,7 +935,8 @@ export async function startTui(options: TuiOptions) {
       if (!arg) throw new Error("Use /board-msg TEXT.");
       if (!council.postBoard(arg))
         throw new Error("A council must be running to post to the board.");
-      notice = "Posted to the live board; peers will read it on their next turn.";
+      notice =
+        "Posted to the live board; peers will read it on their next turn.";
       tab = 2;
       return;
     }

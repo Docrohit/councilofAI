@@ -138,7 +138,32 @@ The importer pins the upstream revision, records the sample seed, saves the lice
 | GLM / Z.ai                | `https://api.z.ai/api/paas/v4` | Chat completions; check the endpoint for your account/plan     |
 | Other compatible endpoint | Your configured base URL       | OpenAI chat-completions streaming contract                     |
 
-Use model IDs available to **your** account or local runtime. Council does not silently choose a model or download weights. “Test” makes a small real model call and may incur usage. Reasoning is opt-in because support and parameter semantics differ by model. Native model tool-calling is not required: Council uses a validated streaming text action protocol, making small-model instruction following an important live acceptance test.
+The web **Connections** form includes shortcuts for DeepSeek V4 Pro,
+GLM 5.3, GPT-5.5 High, GPT-6 Luna, GPT-6.1 Sol, GPT-5.6 Terra,
+GPT-5.3 Codex, GPT-4o and Claude Opus 5.5. Shortcuts prefill the provider,
+endpoint, model ID and documented effort defaults; the model and effort fields
+stay editable for newly released models. OpenAI's current catalog lists
+GPT-5.6 Terra, not GPT-6 Terra, so add `gpt-6-terra` manually only after it
+appears in your account's model list.
+
+Use model IDs available to **your** account or local runtime. Council does not silently choose a model or download weights. “Test” makes a small real model call and may incur usage. Reasoning effort is provider-specific: OpenAI uses `reasoning.effort`, Claude uses `output_config.effort`, and GLM/DeepSeek-style chat endpoints use `reasoning_effort`. Current official docs for these providers use `max` as the top effort name rather than `ultra`. Native model tool-calling is not required: Council uses a validated streaming text action protocol, making small-model instruction following an important live acceptance test.
+
+Terminal examples:
+
+```sh
+council models add --name deepseek --kind compatible \
+  --model deepseek-v4-pro --url https://api.deepseek.com \
+  --key-env DEEPSEEK_API_KEY --effort high
+council models add --name glm53 --kind glm \
+  --model glm-5.3 --url https://api.z.ai/api/paas/v4 \
+  --key-env ZAI_API_KEY --effort max
+council models add --name gpt55-high --kind openai \
+  --model gpt-5.5 --key-env OPENAI_API_KEY --effort high
+council models add --name luna --kind openai \
+  --model gpt-6-luna --key-env OPENAI_API_KEY --effort low
+council models add --name opus55 --kind anthropic \
+  --model claude-opus-5-5 --key-env ANTHROPIC_API_KEY --effort medium
+```
 
 For self-hosted RunPod/vLLM models, use a direct pod-local URL when Council runs
 inside RunPod, a Mac SSH tunnel for local desktop use, or bridge mode for hosted

@@ -68,6 +68,7 @@ for (const kind of ["ollama", "vllm", "openai", "anthropic", "glm"] as const)
           assert.equal(url, "/responses");
           assert.equal(body.store, false);
           assert.equal(body.reasoning.summary, "auto");
+          assert.equal(body.reasoning.effort, "high");
           return {
             frames: [
               {
@@ -86,6 +87,7 @@ for (const kind of ["ollama", "vllm", "openai", "anthropic", "glm"] as const)
           assert.equal(url, "/messages");
           assert.equal(body.system, "Be useful");
           assert.equal(body.thinking.type, "adaptive");
+          assert.equal(body.output_config.effort, "high");
           return {
             frames: [
               {
@@ -106,6 +108,11 @@ for (const kind of ["ollama", "vllm", "openai", "anthropic", "glm"] as const)
           };
         }
         assert.equal(url, "/chat/completions");
+        assert.equal(
+          kind === "glm" ? body.thinking.type : "enabled",
+          "enabled",
+        );
+        assert.equal(body.reasoning_effort, "high");
         return {
           frames: [
             {
@@ -131,6 +138,7 @@ for (const kind of ["ollama", "vllm", "openai", "anthropic", "glm"] as const)
           model: "fixture-model",
           transport: "direct",
           reasoning: true,
+          reasoningEffort: "high",
         };
         for await (const c of complete(p, request)) chunks.push(c);
         assert.equal(

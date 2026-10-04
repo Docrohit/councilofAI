@@ -40,6 +40,7 @@ const { values, positionals } = parseArgs({
     name: { type: "string" },
     kind: { type: "string" },
     model: { type: "string" },
+    effort: { type: "string" },
     "key-env": { type: "string" },
     "allow-write": { type: "boolean" },
     web: { type: "boolean" },
@@ -332,10 +333,10 @@ async function main() {
   }
   if (values.help) {
     console.log(
-      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n      [--max-output-tokens N] [--team FILE]\n  upgrade [--check] [--web]          Update a clean main installation; --web builds the web UI\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--web]                      Enable public web research (search fees may apply)\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-output-tokens N]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
+      `Council CLI / native TUI\n\n  council / tui / code               Open Council in the current directory\n      [--directory PATH] [--agents 5] [--providers ID1,ID2]\n      [--max-output-tokens N] [--team FILE]\n  upgrade [--check] [--web]          Update a clean main installation; --web builds the web UI\n  models list                       List standalone model connections\n  models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME] [--effort LEVEL]\n  models remove ID                  Remove a standalone connection\n  local-run "goal"                   Run without a TUI or web account\n      [--web]                      Enable public web research (search fees may apply)\n      [--allow-write] [--allow-exec]  Explicitly allow native tools (otherwise denied)\n  opencode --url URL --directory PATH  Optional legacy OpenCode integration\n\nHosted-account commands:\n  login [--server URL]               Sign in and save a 30-day token\n  connections                       List your model connection IDs\n  run "goal" --providers ID1,ID2     Start and stream a peer discussion\n      [--agents 5] [--concurrency 1] [--max-calls 24]\n      [--max-output-tokens N]\n      [--max-agents unlimited] [--max-depth unlimited]\n  watch RUN_ID                      Replay and follow a session\n  stop RUN_ID                       Stop a session\n  worker --provider ID --url URL    Connect a local model to a hosted account\n  coding-worker --provider ID --url http://127.0.0.1:4096 --directory /project\n                                    Connect an OpenCode coding runtime\n      [--native-permissions]        Opt into the runtime permission policy\n  logout                            Revoke the current token\n\nEnvironment: COUNCIL_SERVER, COUNCIL_TOKEN, COUNCIL_MODEL_API_KEY\nHosted-account commands require web signup. Standalone commands do not require a web account.`,
     );
     console.log(
-      "\nGoal and channel commands:\n  telegram status|set|clear         Manage Telegram bot bridge\n  run \"goal\" --providers ID --goal  Start goal mode\n      [--min-goal-minutes 10] [--max-goal-minutes 180]",
+      '\nGoal and channel commands:\n  telegram status|set|clear         Manage Telegram bot bridge\n  run "goal" --providers ID --goal  Start goal mode\n      [--min-goal-minutes 10] [--max-goal-minutes 180]',
     );
     return;
   }
@@ -386,13 +387,14 @@ async function main() {
         defaults = nativeDefaults[kind];
       if (!defaults || !values.name || !values.model)
         throw new Error(
-          "Use models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME].",
+          "Use models add --name ID --kind KIND --model MODEL [--url URL] [--key-env ENV_NAME] [--effort LEVEL].",
         );
       const m = saveModel({
         id: values.name,
         kind,
         model: values.model,
         baseUrl: values.url || defaults.url,
+        reasoningEffort: values.effort || undefined,
         keyEnv: values["key-env"] || defaults.keyEnv,
       });
       console.log(
@@ -404,7 +406,7 @@ async function main() {
     } else
       for (const m of loadModels())
         console.log(
-          `${m.id}  ${m.kind}  ${m.model}  ${m.baseUrl}  key: ${m.keyEnv || "none"}`,
+          `${m.id}  ${m.kind}  ${m.model}  ${m.baseUrl}  effort: ${m.reasoningEffort || "default"}  key: ${m.keyEnv || "none"}`,
         );
     return;
   }

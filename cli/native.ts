@@ -32,6 +32,9 @@ const modelSchema = z.object({
   kind: z.enum(["openai", "anthropic", "glm", "ollama", "vllm", "compatible"]),
   model: z.string().min(1).max(200),
   baseUrl: z.string().max(500),
+  reasoningEffort: z
+    .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+    .optional(),
   keyEnv: z
     .string()
     .regex(/^[A-Z][A-Z0-9_]*$/)
@@ -67,7 +70,9 @@ export function applyTeamProfile(config: RunConfig, file: string): RunConfig {
   } catch (error) {
     const message =
       error instanceof z.ZodError
-        ? error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+        ? error.issues
+            .map((i) => `${i.path.join(".")}: ${i.message}`)
+            .join("; ")
         : (error as Error).message;
     throw new Error(`Team profile rejected (${file}): ${message}`);
   }
@@ -79,7 +84,8 @@ export function applyTeamProfile(config: RunConfig, file: string): RunConfig {
     );
     if (!member) continue;
     if (agent.role !== undefined) member.role = agent.role;
-    if (agent.systemPrompt !== undefined) member.systemPrompt = agent.systemPrompt;
+    if (agent.systemPrompt !== undefined)
+      member.systemPrompt = agent.systemPrompt;
     if (agent.maxOutputTokens !== undefined)
       member.maxOutputTokens = agent.maxOutputTokens;
   }
@@ -248,7 +254,8 @@ export class NativeCouncil {
         baseUrl: model.baseUrl,
         model: model.model,
         transport: "direct",
-        reasoning: false,
+        reasoning: !!model.reasoningEffort,
+        reasoningEffort: model.reasoningEffort,
       };
       const secret = modelKey(model);
       this.db
@@ -342,7 +349,9 @@ export class NativeCouncil {
             m.maxOutputTokens > 16384),
       )
     )
-      throw new Error("Invalid agent output tokens: choose 256–16384 per agent.");
+      throw new Error(
+        "Invalid agent output tokens: choose 256–16384 per agent.",
+      );
     config = structuredClone(config);
     if (!prompt.trim() || prompt.length > 20000)
       throw new Error("Enter a goal of 1–20000 characters.");
@@ -416,7 +425,10 @@ export class NativeCouncil {
   sendUserMessage(to: string, content: string) {
     for (const id of this.engine.active.keys()) {
       const result = this.engine.sendUserMessage(this.userId, id, to, content);
-      if (result.ok || result.error !== "This session is not currently running.")
+      if (
+        result.ok ||
+        result.error !== "This session is not currently running."
+      )
         return result;
     }
     return { ok: false, error: "A council must be running to send a message." };
@@ -427,10 +439,16 @@ export class NativeCouncil {
   ) {
     for (const id of this.engine.active.keys()) {
       const result = this.engine.updateGoal(this.userId, id, goal, options);
-      if (result.ok || result.error !== "This session is not currently running.")
+      if (
+        result.ok ||
+        result.error !== "This session is not currently running."
+      )
         return result;
     }
-    return { ok: false, error: "A council must be running to update its goal." };
+    return {
+      ok: false,
+      error: "A council must be running to update its goal.",
+    };
   }
   async close() {
     this.stop();

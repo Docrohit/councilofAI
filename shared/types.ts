@@ -7,6 +7,14 @@ export type ProviderKind =
   | "compatible"
   | "opencode"
   | "demo";
+export type ReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
 export interface Provider {
   id: string;
   name: string;
@@ -15,6 +23,7 @@ export interface Provider {
   model: string;
   transport: "direct" | "bridge";
   reasoning: boolean;
+  reasoningEffort?: ReasoningEffort;
   hasKey?: boolean;
   apiKey?: string;
 }

@@ -51,6 +51,7 @@ import type {
   Member,
   Provider,
   ProviderKind,
+  ReasoningEffort,
   Run,
   RunConfig,
   User,
@@ -317,7 +318,8 @@ interface Turn {
 function activity(events: CouncilEvent[]) {
   const turns = new Map<string, Turn>();
   const items: (
-    { type: "turn"; id: string } | { type: "event"; event: CouncilEvent }
+    | { type: "turn"; id: string }
+    | { type: "event"; event: CouncilEvent }
   )[] = [];
   for (const event of events) {
     const d = event.data;
@@ -1879,6 +1881,133 @@ const presets: Record<
   },
   demo: { url: "", model: "scripted-demo", label: "Scripted demo" },
 };
+type ModelShortcut = {
+  id: string;
+  label: string;
+  name: string;
+  kind: ProviderKind;
+  baseUrl: string;
+  model: string;
+  defaultReasoning?: boolean;
+  defaultEffort?: ReasoningEffort;
+  efforts?: ReasoningEffort[];
+  note?: string;
+};
+const allReasoningEfforts: ReasoningEffort[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+function reasoningEfforts(kind: ProviderKind, shortcut?: ModelShortcut) {
+  if (shortcut?.efforts) return shortcut.efforts;
+  if (kind === "glm") return ["low", "high", "max"] as ReasoningEffort[];
+  return allReasoningEfforts;
+}
+const modelShortcuts: ModelShortcut[] = [
+  {
+    id: "deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    name: "DeepSeek V4 Pro",
+    kind: "compatible",
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-v4-pro",
+    defaultReasoning: true,
+    defaultEffort: "high",
+    efforts: ["low", "high", "max"],
+    note: "DeepSeek V4 Pro supports low, high and max thinking effort; high is its documented default.",
+  },
+  {
+    id: "glm-5.3",
+    label: "GLM 5.3",
+    name: "GLM 5.3",
+    kind: "glm",
+    baseUrl: "https://api.z.ai/api/paas/v4",
+    model: "glm-5.3",
+    defaultReasoning: true,
+    defaultEffort: "max",
+    efforts: ["low", "high", "max"],
+    note: "GLM 5.3 always reasons and rejects unsupported effort values; max is recommended for complex coding.",
+  },
+  {
+    id: "gpt-5.5-high",
+    label: "OpenAI GPT-5.5 High",
+    name: "GPT-5.5 High",
+    kind: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-5.5",
+    defaultReasoning: true,
+    defaultEffort: "high",
+    efforts: ["none", "low", "medium", "high", "xhigh"],
+    note: "GPT-5.5 supports none, low, medium, high and xhigh; medium is default, this shortcut sets high.",
+  },
+  {
+    id: "gpt-6-luna",
+    label: "OpenAI GPT-6 Luna",
+    name: "GPT-6 Luna",
+    kind: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-6-luna",
+    defaultReasoning: true,
+    defaultEffort: "low",
+    efforts: ["none", "low", "medium", "high", "xhigh", "max"],
+  },
+  {
+    id: "gpt-6.1-sol",
+    label: "OpenAI GPT-6.1 Sol",
+    name: "GPT-6.1 Sol",
+    kind: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-6.1-sol",
+    defaultReasoning: true,
+    defaultEffort: "medium",
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+  },
+  {
+    id: "gpt-5.6-terra",
+    label: "OpenAI GPT-5.6 Terra",
+    name: "GPT-5.6 Terra",
+    kind: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-5.6-terra",
+    defaultReasoning: true,
+    defaultEffort: "medium",
+    note: "Current Terra family option; GPT-6 Terra is not listed in OpenAI's model catalog.",
+  },
+  {
+    id: "gpt-5.3-codex",
+    label: "OpenAI GPT-5.3 Codex",
+    name: "GPT-5.3 Codex",
+    kind: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-5.3-codex",
+    note: "Legacy Codex model; OpenAI recommends newer GPT-6 replacements.",
+  },
+  {
+    id: "gpt-4o",
+    label: "OpenAI GPT-4o",
+    name: "GPT-4o",
+    kind: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o",
+    note: "Kept as a familiar existing OpenAI model ID.",
+  },
+  {
+    id: "claude-opus-5-5",
+    label: "Claude Opus 5.5",
+    name: "Claude Opus 5.5",
+    kind: "anthropic",
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-opus-5-5",
+    defaultReasoning: true,
+    defaultEffort: "medium",
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    note: "Claude Opus 5.5 always uses adaptive thinking; medium is the documented default.",
+  },
+];
 function Connections({
   close,
   providers,
@@ -1894,6 +2023,7 @@ function Connections({
   const [show, setShow] = useState(false);
   const [kind, setKind] = useState<ProviderKind>("ollama");
   const [transport, setTransport] = useState<"direct" | "bridge">("direct");
+  const [shortcutId, setShortcutId] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1905,6 +2035,7 @@ function Connections({
   const [kiteApiKey, setKiteApiKey] = useState("");
   const [kiteAccessToken, setKiteAccessToken] = useState("");
   const [kiteSaving, setKiteSaving] = useState(false);
+  const shortcut = modelShortcuts.find((item) => item.id === shortcutId);
   useEffect(() => {
     api("/integrations/telegram")
       .then(setTelegram)
@@ -1918,11 +2049,21 @@ function Connections({
     setLoading(true);
     setError("");
     const data = Object.fromEntries(new FormData(e.currentTarget));
+    const reasoningEffort =
+      typeof data.reasoningEffort === "string" && data.reasoningEffort
+        ? data.reasoningEffort
+        : undefined;
     try {
       await api(
         edit ? `/providers/${edit.id}` : "/providers",
         edit ? "PUT" : "POST",
-        { ...data, kind, transport, reasoning: data.reasoning === "on" },
+        {
+          ...data,
+          kind,
+          transport,
+          reasoning: data.reasoning === "on" || !!reasoningEffort,
+          reasoningEffort,
+        },
       );
       await refresh();
       setShow(false);
@@ -1973,7 +2114,10 @@ function Connections({
             <div>
               <b>{p.name}</b>
               <span>
-                {p.model} ·{" "}
+                {p.model}
+                {p.reasoningEffort
+                  ? ` · effort ${p.reasoningEffort}`
+                  : ""} ·{" "}
                 {p.transport === "bridge"
                   ? "Local bridge"
                   : presets[p.kind].label}
@@ -1997,6 +2141,7 @@ function Connections({
                 setEdit(p);
                 setKind(p.kind);
                 setTransport(p.transport);
+                setShortcutId("");
                 setShow(true);
                 setError("");
               }}
@@ -2223,11 +2368,36 @@ function Connections({
         >
           <div className="form-grid">
             <label>
+              Known model
+              <select
+                value={shortcutId}
+                disabled={!!edit}
+                onChange={(e) => {
+                  const next = modelShortcuts.find(
+                    (item) => item.id === e.target.value,
+                  );
+                  setShortcutId(e.target.value);
+                  if (next) {
+                    setKind(next.kind);
+                    setTransport("direct");
+                  }
+                }}
+              >
+                <option value="">Custom exact model ID</option>
+                {modelShortcuts.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               Provider
               <select
                 value={kind}
                 onChange={(e) => {
                   setKind(e.target.value as ProviderKind);
+                  setShortcutId("");
                   setTransport(
                     e.target.value === "opencode" ? "bridge" : "direct",
                   );
@@ -2245,7 +2415,8 @@ function Connections({
               <input
                 name="name"
                 required
-                defaultValue={edit?.name || ""}
+                key={`name-${edit?.id || shortcutId || "custom"}`}
+                defaultValue={edit?.name || shortcut?.name || ""}
                 placeholder="My local Qwen"
               />
             </label>
@@ -2253,10 +2424,12 @@ function Connections({
               Model ID
               <input
                 name="model"
-                key={`model-${kind}`}
+                key={`model-${kind}-${shortcutId || "custom"}`}
                 required
                 defaultValue={
-                  edit?.kind === kind ? edit.model : presets[kind].model
+                  edit?.kind === kind
+                    ? edit.model
+                    : shortcut?.model || presets[kind].model
                 }
                 placeholder="Exact model ID from your provider"
               />
@@ -2282,9 +2455,11 @@ function Connections({
               Base URL
               <input
                 name="baseUrl"
-                key={`url-${kind}`}
+                key={`url-${kind}-${shortcutId || "custom"}`}
                 defaultValue={
-                  edit?.kind === kind ? edit.baseUrl : presets[kind].url
+                  edit?.kind === kind
+                    ? edit.baseUrl
+                    : shortcut?.baseUrl || presets[kind].url
                 }
                 placeholder="https://provider.example/v1"
                 required={kind !== "demo"}
@@ -2312,10 +2487,30 @@ function Connections({
           <label className="checkbox-label">
             <input
               name="reasoning"
+              key={`reasoning-${edit?.id || shortcutId || "custom"}`}
               type="checkbox"
-              defaultChecked={edit?.reasoning || false}
+              defaultChecked={
+                edit?.reasoning || shortcut?.defaultReasoning || false
+              }
             />{" "}
             Request provider reasoning / summaries (model must support it)
+          </label>
+          <label>
+            Reasoning effort
+            <select
+              name="reasoningEffort"
+              key={`effort-${kind}-${shortcutId || "custom"}`}
+              defaultValue={
+                edit?.reasoningEffort || shortcut?.defaultEffort || ""
+              }
+            >
+              <option value="">Provider default</option>
+              {reasoningEfforts(kind, shortcut).map((effort) => (
+                <option key={effort} value={effort}>
+                  {effort}
+                </option>
+              ))}
+            </select>
           </label>
           {kind === "anthropic" && (
             <p className="field-help">
@@ -2323,6 +2518,7 @@ function Connections({
               not support it.
             </p>
           )}
+          {shortcut?.note && <p className="field-help">{shortcut.note}</p>}
           {kind === "opencode" && (
             <div className="notice">
               Real coding in your chosen project, using OpenCode’s file,
@@ -2372,6 +2568,7 @@ function Connections({
               setEdit(null);
               setKind("ollama");
               setTransport("direct");
+              setShortcutId("");
               setShow(true);
               setError("");
             }}

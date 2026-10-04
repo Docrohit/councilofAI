@@ -127,9 +127,7 @@ const ollamaMessages = (messages: ChatMessage[]) =>
   messages.map((message) => {
     if (typeof message.content === "string") return message;
     const images = message.content.filter(
-      (
-        part,
-      ): part is Extract<ChatContentPart, { type: "image_url" }> =>
+      (part): part is Extract<ChatContentPart, { type: "image_url" }> =>
         part.type === "image_url",
     );
     return {
@@ -225,12 +223,14 @@ export async function* complete(
     "Content-Type": "application/json",
   };
   let suffix = "/chat/completions";
+  const effort = provider.reasoningEffort;
   let body: any = {
     model: provider.model,
     messages: chatMessages,
     stream: true,
     max_tokens: request.maxTokens,
   };
+  if (effort) body.reasoning_effort = effort;
   if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
   if (provider.kind === "ollama") {
     suffix = "/api/chat";
@@ -254,7 +254,9 @@ export async function* complete(
       stream: true,
       store: false,
       max_output_tokens: request.maxTokens,
-      ...(provider.reasoning ? { reasoning: { summary: "auto" } } : {}),
+      ...(provider.reasoning || effort
+        ? { reasoning: { summary: "auto", ...(effort ? { effort } : {}) } }
+        : {}),
     };
   }
   if (provider.kind === "anthropic") {
@@ -272,10 +274,15 @@ export async function* complete(
       stream: true,
       max_tokens: request.maxTokens,
       ...(provider.reasoning ? { thinking: { type: "adaptive" } } : {}),
+      ...(effort ? { output_config: { effort } } : {}),
     };
   }
-  if (provider.kind === "glm")
-    body.thinking = { type: provider.reasoning ? "enabled" : "disabled" };
+  if (provider.kind === "glm") {
+    body.thinking = {
+      type: provider.reasoning || effort ? "enabled" : "disabled",
+    };
+    if (effort) body.reasoning_effort = effort;
+  }
   const response = await fetch(base + suffix, {
     method: "POST",
     headers,

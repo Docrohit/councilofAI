@@ -61,6 +61,9 @@ const providerSchema = z.object({
   model: z.string().trim().min(1).max(200),
   transport: z.enum(["direct", "bridge"]).default("direct"),
   reasoning: z.boolean().default(false),
+  reasoningEffort: z
+    .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+    .optional(),
   apiKey: z.string().max(1000).optional(),
   clearKey: z.boolean().optional(),
 });

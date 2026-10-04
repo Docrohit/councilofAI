@@ -2043,7 +2043,8 @@ function Connections({
           <p className="field-help">
             Telegram messages can start Council sessions or guide a running
             session. The bot receives only board progress and final answers. Use{" "}
-            <code>/goal 10-180m your goal</code> in Telegram for goal mode.
+            <code>/goal 10-180m your goal</code> for goal mode or{" "}
+            <code>/new chat</code> to start fresh.
           </p>
           <div className="form-grid">
             <label className="full">

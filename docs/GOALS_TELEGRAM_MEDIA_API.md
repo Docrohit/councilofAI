@@ -46,6 +46,9 @@ Telegram behavior:
 
 - `/start` returns setup hints.
 - `/status` reports the active Telegram-linked session.
+- `/new chat` or `/new` detaches the Telegram chat from its current Council
+  session. If that session is still queued/running, Council stops it so the next
+  Telegram message can start a fresh session.
 - `/goal 10-180m TEXT` starts or updates a goal-mode run.
 - Ordinary messages start a normal run when no Telegram-linked run is active.
 - Ordinary messages during an active run are posted as board guidance.

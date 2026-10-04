@@ -59,6 +59,10 @@ function parseGoal(text: string) {
   return { goal: match[3].trim(), minMinutes, maxMinutes };
 }
 
+function isNewChatCommand(text: string) {
+  return /^\/\s*new(?:@\S+)?(?:\s+chat)?\s*$/i.test(text.trim());
+}
+
 export class TelegramBridge {
   private loops = new Map<string, AbortController>();
   private watches = new Set<string>();
@@ -217,7 +221,7 @@ export class TelegramBridge {
       await this.send(
         token,
         chatId,
-        "Council connected. Send /goal 10-180m your goal to start goal mode, or send a message to start a normal council session. While a session runs, ordinary messages become board guidance.",
+        "Council connected. Send /goal 10-180m your goal to start goal mode, or send a message to start a normal council session. While a session runs, ordinary messages become board guidance. Send /new chat to detach from the current session and start fresh.",
       );
       return;
     }
@@ -232,8 +236,23 @@ export class TelegramBridge {
       );
       return;
     }
-    const goal = parseGoal(effectiveText);
     const active = this.activeRun(userId, chatId);
+    if (isNewChatCommand(effectiveText)) {
+      const stopped =
+        active && ["queued", "running"].includes(active.status)
+          ? this.engine.cancel(userId, active.id)
+          : false;
+      this.clearChat(userId, chatId);
+      await this.send(
+        token,
+        chatId,
+        stopped
+          ? "New chat ready. I stopped the previous Telegram-linked session; send your next message or /goal to start fresh."
+          : "New chat ready. Send your next message or /goal to start fresh.",
+      );
+      return;
+    }
+    const goal = parseGoal(effectiveText);
     if (goal && active && ["queued", "running"].includes(active.status)) {
       const result = this.engine.updateGoal(userId, active.id, goal.goal, {
         minMinutes: goal.minMinutes,
@@ -343,6 +362,12 @@ export class TelegramBridge {
     const config = JSON.parse(row.config) as TelegramConfig;
     const runId = config.chats?.[chatId]?.runId;
     return runId ? this.store.getRun(userId, runId) : undefined;
+  }
+
+  private clearChat(userId: string, chatId: string) {
+    this.saveConfig(userId, (next) => {
+      if (next.chats) delete next.chats[chatId];
+    });
   }
 
   private teamConfig(userId: string): RunConfig | undefined {

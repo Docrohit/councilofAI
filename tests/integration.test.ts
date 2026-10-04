@@ -6,6 +6,7 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { createApp } from "../server/app.ts";
 import { Bridge } from "../server/bridge.ts";
+import { TelegramBridge } from "../server/telegram.ts";
 import type { RunConfig } from "../shared/types.ts";
 import { extractPage } from "../server/research.ts";
 process.env.DEMO_DELAY_MS = "0";
@@ -378,7 +379,11 @@ test("user can post a live board message that is queued for peers", async () => 
       "data: " +
         JSON.stringify({
           choices: [
-            { delta: { content: "```council\n" + JSON.stringify(output) + "\n```" } },
+            {
+              delta: {
+                content: "```council\n" + JSON.stringify(output) + "\n```",
+              },
+            },
           ],
         }) +
         "\n\ndata: " +
@@ -406,7 +411,10 @@ test("user can post a live board message that is queued for peers", async () => 
         },
         auth.cookie,
       );
-      const config = cfg([provider.data.id], 2, { concurrency: 1, maxCalls: 8 });
+      const config = cfg([provider.data.id], 2, {
+        concurrency: 1,
+        maxCalls: 8,
+      });
       config.members[0].name = "Peer 4";
       config.members[1].name = "検証";
       const started = await api(
@@ -517,7 +525,11 @@ test("live board message invalidates stale in-flight candidate reviews", async (
       "data: " +
         JSON.stringify({
           choices: [
-            { delta: { content: "```council\n" + JSON.stringify(output) + "\n```" } },
+            {
+              delta: {
+                content: "```council\n" + JSON.stringify(output) + "\n```",
+              },
+            },
           ],
         }) +
         "\n\ndata: " +
@@ -554,7 +566,11 @@ test("live board message invalidates stale in-flight candidate reviews", async (
         auth.cookie,
       );
       for (let i = 0; i < 50; i++) {
-        const snapshot = await api("/runs/" + started.data.id, undefined, auth.cookie);
+        const snapshot = await api(
+          "/runs/" + started.data.id,
+          undefined,
+          auth.cookie,
+        );
         if (
           snapshot.data.events.some((e: any) => e.type === "candidate.proposed")
         )
@@ -573,14 +589,17 @@ test("live board message invalidates stale in-flight candidate reviews", async (
         result.events.some(
           (e: any) =>
             e.type === "warning" &&
-            String(e.data.message).includes("Candidate proposal/review was ignored"),
+            String(e.data.message).includes(
+              "Candidate proposal/review was ignored",
+            ),
         ),
       );
       assert(
         result.events.some(
           (e: any) =>
             e.type === "candidate.review" &&
-            e.data.reason === "Fresh review after reading the user board message.",
+            e.data.reason ===
+              "Fresh review after reading the user board message.",
         ),
       );
     });
@@ -636,7 +655,11 @@ test("direct user message invalidates the addressed peer's stale in-flight candi
       "data: " +
         JSON.stringify({
           choices: [
-            { delta: { content: "```council\n" + JSON.stringify(output) + "\n```" } },
+            {
+              delta: {
+                content: "```council\n" + JSON.stringify(output) + "\n```",
+              },
+            },
           ],
         }) +
         "\n\ndata: " +
@@ -673,7 +696,11 @@ test("direct user message invalidates the addressed peer's stale in-flight candi
         auth.cookie,
       );
       for (let i = 0; i < 50; i++) {
-        const snapshot = await api("/runs/" + started.data.id, undefined, auth.cookie);
+        const snapshot = await api(
+          "/runs/" + started.data.id,
+          undefined,
+          auth.cookie,
+        );
         if (
           snapshot.data.events.some((e: any) => e.type === "candidate.proposed")
         )
@@ -695,7 +722,9 @@ test("direct user message invalidates the addressed peer's stale in-flight candi
         result.events.some(
           (e: any) =>
             e.type === "warning" &&
-            String(e.data.message).includes("Candidate proposal/review was ignored"),
+            String(e.data.message).includes(
+              "Candidate proposal/review was ignored",
+            ),
         ),
       );
       assert(
@@ -703,14 +732,16 @@ test("direct user message invalidates the addressed peer's stale in-flight candi
           (e: any) =>
             e.type === "candidate.review" &&
             e.data.agentId === "peer-2" &&
-            e.data.reason === "Fresh review after reading the direct user message.",
+            e.data.reason ===
+              "Fresh review after reading the direct user message.",
         ),
       );
       assert(
         !result.events.some(
           (e: any) =>
             e.type === "candidate.review" &&
-            e.data.reason === "Stale review from before the direct user message.",
+            e.data.reason ===
+              "Stale review from before the direct user message.",
         ),
       );
     });
@@ -767,7 +798,11 @@ test("live goal update is distinct from a board message and resets review work",
       "data: " +
         JSON.stringify({
           choices: [
-            { delta: { content: "```council\n" + JSON.stringify(output) + "\n```" } },
+            {
+              delta: {
+                content: "```council\n" + JSON.stringify(output) + "\n```",
+              },
+            },
           ],
         }) +
         "\n\ndata: " +
@@ -822,8 +857,7 @@ test("live goal update is distinct from a board message and resets review work",
       assert(
         result.events.some(
           (e: any) =>
-            e.type === "goal.updated" &&
-            e.data.goal.includes("revised goal"),
+            e.type === "goal.updated" && e.data.goal.includes("revised goal"),
         ),
       );
       assert(
@@ -896,7 +930,11 @@ test("candidate reviews persist across continuation and unresolved failed-peer o
       "data: " +
         JSON.stringify({
           choices: [
-            { delta: { content: "```council\n" + JSON.stringify(actions) + "\n```" } },
+            {
+              delta: {
+                content: "```council\n" + JSON.stringify(actions) + "\n```",
+              },
+            },
           ],
         }) +
         "\n\ndata: " +
@@ -934,7 +972,10 @@ test("candidate reviews persist across continuation and unresolved failed-peer o
       );
       const first = await done(api, auth.cookie, started.data.id);
       assert.equal(first.run.status, "needs_review");
-      assert.equal(first.run.sharedState.candidate.reviews["peer-2"].agree, false);
+      assert.equal(
+        first.run.sharedState.candidate.reviews["peer-2"].agree,
+        false,
+      );
       allowAgreement = true;
       const continued = await api(
         `/runs/${started.data.id}/continue`,
@@ -991,7 +1032,11 @@ test("an unavailable peer's negative candidate review remains an unresolved obje
       "data: " +
         JSON.stringify({
           choices: [
-            { delta: { content: "```council\n" + JSON.stringify(actions) + "\n```" } },
+            {
+              delta: {
+                content: "```council\n" + JSON.stringify(actions) + "\n```",
+              },
+            },
           ],
         }) +
         "\n\ndata: " +
@@ -1029,7 +1074,10 @@ test("an unavailable peer's negative candidate review remains an unresolved obje
       );
       const result = await done(api, auth.cookie, started.data.id);
       assert.equal(result.run.status, "needs_review");
-      assert.match(result.run.final, /Sage objection must survive provider loss/);
+      assert.match(
+        result.run.final,
+        /Sage objection must survive provider loss/,
+      );
       assert(
         result.events.some(
           (e: any) =>
@@ -1391,14 +1439,20 @@ test("telegram bridge token can be saved encrypted and reported without disclosu
       assert.equal(saved.data.enabled, false);
       assert.equal(saved.data.hasToken, true);
       assert.equal(saved.data.username, "council_test_bot");
-      const status = await api("/integrations/telegram", undefined, auth.cookie);
+      const status = await api(
+        "/integrations/telegram",
+        undefined,
+        auth.cookie,
+      );
       assert.equal(status.data.hasToken, true);
       assert.equal(JSON.stringify(status.data).includes("secret-token"), false);
       const userRow = db
         .prepare("SELECT id FROM users WHERE email=?")
         .get("telegram@example.test") as any;
       const row = db
-        .prepare("SELECT secret FROM integrations WHERE user_id=? AND kind='telegram'")
+        .prepare(
+          "SELECT secret FROM integrations WHERE user_id=? AND kind='telegram'",
+        )
         .get(userRow.id) as any;
       assert.notEqual(row.secret, "123456:secret-token");
       await api("/integrations/telegram", undefined, auth.cookie, "DELETE");
@@ -1407,6 +1461,86 @@ test("telegram bridge token can be saved encrypted and reported without disclosu
           .hasToken,
         false,
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }));
+
+test("telegram new chat command detaches and stops the linked active session", async () =>
+  harness(async ({ api, db, store, engine }: any) => {
+    const originalFetch = globalThis.fetch;
+    const sent: string[] = [];
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = String(input);
+      if (url.startsWith("https://api.telegram.org/")) {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        if (url.endsWith("/sendMessage")) sent.push(body.text);
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+    try {
+      const auth = await api("/auth/signup", {
+        email: "telegram-new-chat@example.test",
+        password: "long-password-123",
+      });
+      const user = db
+        .prepare("SELECT id FROM users WHERE email=?")
+        .get("telegram-new-chat@example.test") as any;
+      const run = {
+        id: "11111111-1111-4111-8111-111111111111",
+        title: "Old run",
+        prompt: "Old run",
+        status: "running",
+        config: cfg(["demo"], 1),
+        createdAt: new Date().toISOString(),
+        final: "",
+        demo: true,
+      };
+      store.saveRun(user.id, run);
+      db.prepare(
+        "INSERT INTO integrations(id,user_id,kind,config,secret) VALUES(?,?,?,?,?)",
+      ).run(
+        "tg-test",
+        user.id,
+        "telegram",
+        JSON.stringify({
+          enabled: true,
+          chats: {
+            "123": { runId: run.id, updatedAt: new Date().toISOString() },
+          },
+        }),
+        store.secrets.encrypt("telegram-token"),
+      );
+      let cancelled = "";
+      engine.cancel = (userId: string, runId: string) => {
+        cancelled = `${userId}:${runId}`;
+        return true;
+      };
+      const bridge = new TelegramBridge(db, store, engine, async () => {
+        throw new Error("new chat should not start a run");
+      });
+      await (bridge as any).handleUpdate(user.id, "telegram-token", {
+        update_id: 1,
+        message: {
+          message_id: 7,
+          text: "/ new chat",
+          chat: { id: 123, type: "private" },
+        },
+      });
+      assert.equal(cancelled, `${user.id}:${run.id}`);
+      const row = db
+        .prepare(
+          "SELECT config FROM integrations WHERE user_id=? AND kind='telegram'",
+        )
+        .get(user.id) as any;
+      assert.equal(JSON.parse(row.config).chats["123"], undefined);
+      assert.match(sent.at(-1) || "", /New chat ready/);
+      assert.match(sent.at(-1) || "", /stopped the previous/);
+      assert.equal(auth.status, 201);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2254,8 +2388,14 @@ test("image attachments are passed as multimodal provider content", async () =>
     assert.ok(requests.length >= 1);
     const content = requests[0].messages[1].content;
     assert.ok(Array.isArray(content));
-    assert.equal(content.some((p: any) => p.type === "text"), true);
-    assert.equal(content.some((p: any) => p.type === "image_url"), true);
+    assert.equal(
+      content.some((p: any) => p.type === "text"),
+      true,
+    );
+    assert.equal(
+      content.some((p: any) => p.type === "image_url"),
+      true,
+    );
   }));
 
 test("greetings finish with zero peer turns or tool calls and remain visible on reload", async () =>

@@ -71,7 +71,10 @@ async function imageResponse(response: Response, provider: Provider) {
     throw new Error(
       `${provider.name} image request failed: ${payload?.error?.message || response.status}`,
     );
-  const b64 = payload?.data?.[0]?.b64_json;
+  const b64 =
+    payload?.data?.[0]?.b64_json ||
+    payload?.b64_json ||
+    payload?.output?.find?.((item: any) => item?.b64_json)?.b64_json;
   if (!b64)
     throw new Error(
       `${provider.name} did not return b64_json image data. Check the image model and response format support.`,
@@ -93,18 +96,20 @@ export async function generateImage(
   const provider = selectImageProvider(providers, input.providerId);
   const model = input.model || "gpt-image-1";
   const base = validateEndpoint(provider.baseUrl);
+  const body: Record<string, string> = {
+    model,
+    prompt: input.prompt,
+    size: input.size || "1024x1024",
+  };
+  // GPT image models return b64_json by default and reject response_format.
+  if (!model.startsWith("gpt-image-")) body.response_format = "b64_json";
   const response = await fetch(base + "/images/generations", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${provider.apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      prompt: input.prompt,
-      size: input.size || "1024x1024",
-      response_format: "b64_json",
-    }),
+    body: JSON.stringify(body),
     signal: input.signal,
     redirect: "error",
   });
@@ -147,7 +152,8 @@ export async function editImage(
   form.append("model", model);
   form.append("prompt", input.prompt);
   form.append("size", input.size || "1024x1024");
-  form.append("response_format", "b64_json");
+  // GPT image models return b64_json by default and reject response_format.
+  if (!model.startsWith("gpt-image-")) form.append("response_format", "b64_json");
   form.append("image", image.blob, source.name);
   const base = validateEndpoint(provider.baseUrl);
   const response = await fetch(base + "/images/edits", {

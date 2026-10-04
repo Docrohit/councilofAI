@@ -1687,14 +1687,15 @@ test("telegram new chat command detaches and stops the linked active session", a
       const bridge = new TelegramBridge(db, store, engine, async () => {
         throw new Error("new chat should not start a run");
       }, () => {});
-      await (bridge as any).handleUpdate(user.id, "telegram-token", {
-        update_id: 1,
-        message: {
-          message_id: 7,
-          text: "/ new chat",
-          chat: { id: 123, type: "private" },
-        },
-      });
+      for (const [index, text] of ["/new", "/ new", "/new chat", "/ new chat"].entries())
+        await (bridge as any).handleUpdate(user.id, "telegram-token", {
+          update_id: index + 1,
+          message: {
+            message_id: 7 + index,
+            text,
+            chat: { id: 123, type: "private" },
+          },
+        });
       assert.equal(cancelled, `${user.id}:${run.id}`);
       const row = db
         .prepare(
@@ -1703,8 +1704,168 @@ test("telegram new chat command detaches and stops the linked active session", a
         .get(user.id) as any;
       assert.equal(JSON.parse(row.config).chats["123"], undefined);
       assert.match(sent.at(-1) || "", /New chat ready/);
-      assert.match(sent.at(-1) || "", /stopped the previous/);
+      assert.match(sent[0] || "", /stopped the previous/);
       assert.equal(auth.status, 201);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }));
+
+test("telegram messages after a final answer continue the linked session until /new", async () =>
+  harness(async ({ api, db, store, engine }: any) => {
+    const originalFetch = globalThis.fetch;
+    const sent: string[] = [];
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = String(input);
+      if (url.startsWith("https://api.telegram.org/")) {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        if (url.endsWith("/sendMessage")) sent.push(body.text);
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+    try {
+      await api("/auth/signup", {
+        email: "telegram-followup@example.test",
+        password: "long-password-123",
+      });
+      const user = db
+        .prepare("SELECT id FROM users WHERE email=?")
+        .get("telegram-followup@example.test") as any;
+      const config = cfg(["demo"], 1);
+      db.prepare(
+        "INSERT INTO preferences(user_id,config) VALUES(?,?)",
+      ).run(user.id, JSON.stringify(config));
+      const run = {
+        id: "22222222-2222-4222-8222-222222222222",
+        title: "Old run",
+        prompt: "Old run",
+        status: "completed",
+        config,
+        createdAt: new Date().toISOString(),
+        final: "Old final answer",
+        demo: true,
+      };
+      store.saveRun(user.id, run);
+      db.prepare(
+        "INSERT INTO integrations(id,user_id,kind,config,secret) VALUES(?,?,?,?,?)",
+      ).run(
+        "tg-followup",
+        user.id,
+        "telegram",
+        JSON.stringify({
+          enabled: true,
+          chats: {
+            "123": { runId: run.id, updatedAt: new Date().toISOString() },
+          },
+        }),
+        store.secrets.encrypt("telegram-token"),
+      );
+      let captured: any;
+      const bridge = new TelegramBridge(
+        db,
+        store,
+        engine,
+        async (_userId: string, input: any) => {
+          captured = input;
+          return {
+            id: "33333333-3333-4333-8333-333333333333",
+            title: input.prompt,
+            prompt: input.prompt,
+            status: "queued" as const,
+            config: input.config,
+            createdAt: new Date().toISOString(),
+            final: "",
+            demo: true,
+            parentId: input.parentId,
+          };
+        },
+        () => {},
+      );
+      await (bridge as any).handleUpdate(user.id, "telegram-token", {
+        update_id: 1,
+        message: {
+          message_id: 9,
+          text: "continue this",
+          chat: { id: 123, type: "private" },
+        },
+      });
+      assert.equal(captured.parentId, run.id);
+      assert.match(sent.at(-1) || "", /Session continued:/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }));
+
+test("telegram forwards generated image artifacts as photos", async () =>
+  harness(async ({ api, db, store, engine }: any) => {
+    const originalFetch = globalThis.fetch;
+    const sentMethods: string[] = [];
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = String(input);
+      if (url.startsWith("https://api.telegram.org/")) {
+        if (url.endsWith("/sendPhoto")) {
+          sentMethods.push("sendPhoto");
+          assert(init?.body instanceof FormData);
+          assert.equal((init.body as FormData).get("chat_id"), "123");
+        }
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+    try {
+      await api("/auth/signup", {
+        email: "telegram-image@example.test",
+        password: "long-password-123",
+      });
+      const user = db
+        .prepare("SELECT id FROM users WHERE email=?")
+        .get("telegram-image@example.test") as any;
+      const attachment = {
+        id: "44444444-4444-4444-8444-444444444444",
+        name: "generated-image-fixture.png",
+        kind: "png" as const,
+        size: 12,
+        sha256: "a".repeat(64),
+        text: "",
+        warnings: [],
+        mediaType: "image/png",
+        dataUrl: `data:image/png;base64,${Buffer.from("image").toString("base64")}`,
+      };
+      const run = {
+        id: "55555555-5555-4555-8555-555555555555",
+        title: "Image run",
+        prompt: "make image",
+        status: "running" as const,
+        config: cfg(["demo"], 1),
+        createdAt: new Date().toISOString(),
+        final: "",
+        demo: true,
+        attachments: [attachment],
+      };
+      store.saveRun(user.id, run);
+      const bridge = new TelegramBridge(db, store, engine, async () => run, () => {});
+      await (bridge as any).forwardEvent(user.id, "telegram-token", "123", {
+        id: 1,
+        runId: run.id,
+        type: "tool.result",
+        at: new Date().toISOString(),
+        data: {
+          tool: "media_generate_image",
+          result: JSON.stringify({
+            id: attachment.id,
+            name: attachment.name,
+            sha256: attachment.sha256,
+          }),
+        },
+      });
+      assert.deepEqual(sentMethods, ["sendPhoto"]);
     } finally {
       globalThis.fetch = originalFetch;
     }

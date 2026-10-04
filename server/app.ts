@@ -236,9 +236,10 @@ export function createApp(directory: string, production = false) {
       minGoalMinutes?: number;
       maxGoalMinutes?: number;
       attachmentIds?: string[];
+      parentId?: string;
     },
   ) => {
-    const prompt = z.string().trim().min(1).max(20_000).parse(input.prompt);
+    let prompt = z.string().trim().min(1).max(20_000).parse(input.prompt);
     let config = configSchema.parse(input.config);
     if (
       benchmarks.busy(userId) ||
@@ -282,6 +283,11 @@ export function createApp(directory: string, production = false) {
         maxMinutes: goalMax,
       };
     let attachments: Attachment[] = [];
+    const parent = input.parentId
+      ? store.getRun(userId, input.parentId)
+      : undefined;
+    if (input.parentId && !parent)
+      throw new Error("Previous Telegram session is unavailable. Send /new to start fresh.");
     for (const id of new Set(input.attachmentIds || [])) {
       const row = db
         .prepare(
@@ -294,25 +300,30 @@ export function createApp(directory: string, production = false) {
         );
       attachments.push(JSON.parse(row.data));
     }
+    if (parent) {
+      attachments = [...(parent.attachments || []), ...attachments];
+      prompt = `Previous goal:\n${parent.prompt.slice(0, 6000)}\nPrevious answer:\n${parent.final.slice(0, 6000)}\n\nCurrent follow-up:\n${input.prompt}`;
+    }
     if (attachments.length > ATTACHMENT_MAX_FILES)
       throw new Error("A conversation can include up to four files.");
     assertCanSend(db, userId);
     const run: Run = {
       attachments,
       id: randomUUID(),
-      title: prompt.slice(0, 70),
-      userMessage: prompt,
+      title: input.prompt.slice(0, 70),
+      userMessage: input.prompt,
       prompt,
       config,
       createdAt: new Date().toISOString(),
       status: "queued",
       final: "",
       demo: selected.every((p) => p.kind === "demo"),
+      parentId: input.parentId,
       ...(input.goalMode || config.goalMode
         ? {
             goal: {
               mode: "goal" as const,
-              text: prompt,
+              text: input.prompt,
               minMinutes: goalMin,
               maxMinutes: goalMax,
               updatedAt: new Date().toISOString(),

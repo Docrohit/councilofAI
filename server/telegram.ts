@@ -60,7 +60,24 @@ function parseGoal(text: string) {
 }
 
 function isNewChatCommand(text: string) {
-  return /^\/\s*new(?:@\S+)?(?:\s+chat)?\s*$/i.test(text.trim());
+  const normalized = text
+    .trim()
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .replace(/^\/\s+/, "/")
+    .replace(/\s+/g, " ");
+  return /^\/new(?:@\S+)?(?: chat)?$/i.test(normalized);
+}
+
+function dataUrlToTelegramFile(dataUrl: string, name: string) {
+  const match = /^data:([^;,]+);base64,(.+)$/i.exec(dataUrl);
+  if (!match) return null;
+  const buffer = Buffer.from(match[2], "base64");
+  return {
+    blob: new Blob([buffer], { type: match[1] }),
+    mediaType: match[1],
+    name,
+    size: buffer.length,
+  };
 }
 
 export class TelegramBridge {
@@ -80,6 +97,7 @@ export class TelegramBridge {
         minGoalMinutes?: number;
         maxGoalMinutes?: number;
         attachmentIds?: string[];
+        parentId?: string;
       },
     ) => Promise<Run>,
     private chargeMessage: (userId: string) => void,
@@ -342,12 +360,17 @@ export class TelegramBridge {
         config.members.length * 6 + 12,
       );
     }
+    const parentId =
+      active && !["queued", "running"].includes(active.status)
+        ? active.id
+        : undefined;
     let run: Run;
     try {
       run = await this.startRun(userId, {
         prompt: goal?.goal || effectiveText,
         config,
         attachmentIds: await this.persistAttachments(userId, attachments),
+        parentId,
         ...(goal
           ? {
               goalMode: true,
@@ -371,7 +394,7 @@ export class TelegramBridge {
     await this.send(
       token,
       chatId,
-      `${goal ? "Goal" : "Session"} started: ${run.title}\nI’ll reply with board progress and the final answer.`,
+      `${parentId ? "Session continued" : `${goal ? "Goal" : "Session"} started`}: ${run.title}\nI’ll reply with board progress and the final answer.`,
     );
   }
 
@@ -406,7 +429,7 @@ export class TelegramBridge {
     if (this.watches.has(key)) return;
     this.watches.add(key);
     const unsubscribe = this.store.subscribe(runId, (event) => {
-      void this.forwardEvent(token, chatId, event).catch(() => {});
+      void this.forwardEvent(userId, token, chatId, event).catch(() => {});
       if (
         event.type === "run.status" &&
         !["queued", "running"].includes(event.data.status)
@@ -418,6 +441,7 @@ export class TelegramBridge {
   }
 
   private async forwardEvent(
+    userId: string,
     token: string,
     chatId: string,
     event: CouncilEvent,
@@ -434,6 +458,23 @@ export class TelegramBridge {
     if (event.type === "run.final")
       for (const part of chunks(`Final answer\n\n${event.data.text}`))
         await this.send(token, chatId, part);
+    if (
+      event.type === "tool.result" &&
+      ["media_generate_image", "media_edit_image"].includes(event.data.tool)
+    ) {
+      const result =
+        typeof event.data.result === "string"
+          ? JSON.parse(event.data.result)
+          : event.data.result;
+      const run = this.store.getRun(userId, event.runId);
+      const artifact = run?.attachments?.find(
+        (item) =>
+          item.id === result?.id ||
+          item.name === result?.name ||
+          item.sha256 === result?.sha256,
+      );
+      if (artifact?.dataUrl) await this.sendAttachment(token, chatId, artifact);
+    }
     if (
       event.type === "run.status" &&
       ["failed", "cancelled", "interrupted", "needs_review"].includes(
@@ -454,6 +495,29 @@ export class TelegramBridge {
         text: part,
         disable_web_page_preview: true,
       });
+    }
+  }
+
+  private async sendAttachment(
+    token: string,
+    chatId: string,
+    attachment: Attachment,
+  ) {
+    const file = dataUrlToTelegramFile(attachment.dataUrl || "", attachment.name);
+    if (!file) return;
+    const caption = `Generated image: ${attachment.name}\nsha256 ${attachment.sha256.slice(0, 12)}...`;
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    form.append("caption", caption.slice(0, 1000));
+    form.append("photo", file.blob, attachment.name);
+    try {
+      await this.callForm(token, "sendPhoto", form);
+    } catch {
+      const fallback = new FormData();
+      fallback.append("chat_id", chatId);
+      fallback.append("caption", caption.slice(0, 1000));
+      fallback.append("document", file.blob, attachment.name);
+      await this.callForm(token, "sendDocument", fallback);
     }
   }
 
@@ -519,6 +583,29 @@ export class TelegramBridge {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal,
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok)
+      throw new Error(
+        `Telegram ${method} failed: ${payload.description || response.status}`,
+      );
+    return payload.result;
+  }
+
+  private async callForm(
+    token: string,
+    method: string,
+    body: FormData,
+    signal?: AbortSignal,
+  ) {
+    const response = await fetch(
+      `https://api.telegram.org/bot${token}/${method}`,
+      {
+        method: "POST",
+        body,
+        signal,
+        redirect: "error",
       },
     );
     const payload = await response.json().catch(() => ({}));

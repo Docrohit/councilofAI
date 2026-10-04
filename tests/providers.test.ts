@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { complete, streamJson } from "../server/providers.ts";
+import { editImage, generateImage } from "../server/media.ts";
 import { validateEndpoint } from "../server/security.ts";
 import type { Provider } from "../shared/types.ts";
+import type { Attachment } from "../shared/attachments.ts";
 async function fixture(
   handler: (
     body: any,
@@ -217,6 +219,71 @@ test("hosted connections use exact allowlisted origins and local URLs cannot emb
     () => validateEndpoint("http://user:secret@localhost:1234", false),
     /credentials/,
   );
+});
+
+test("OpenAI GPT image tools omit response_format and return generated attachments", async () => {
+  const png = Buffer.from("generated-image").toString("base64");
+  const seen: { url: string; body: string; contentType: string }[] = [];
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    const body = Buffer.concat(chunks).toString();
+    seen.push({
+      url: req.url || "",
+      body,
+      contentType: String(req.headers["content-type"] || ""),
+    });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ data: [{ b64_json: png }] }));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const address = server.address() as any;
+  const provider: Provider = {
+    id: "openai-image",
+    name: "OpenAI image",
+    kind: "openai",
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    model: "gpt-6-luna",
+    transport: "direct",
+    reasoning: false,
+    apiKey: "fixture-key",
+  };
+  const attachment: Attachment = {
+    id: "image-input",
+    name: "input.png",
+    kind: "png",
+    size: 3,
+    sha256: "abc",
+    text: "",
+    warnings: [],
+    mediaType: "image/png",
+    dataUrl: `data:image/png;base64,${Buffer.from("in").toString("base64")}`,
+  };
+  try {
+    const generated = await generateImage([provider], {
+      runId: "run-1",
+      model: "gpt-image-1",
+      prompt: "make an app icon",
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(generated.kind, "png");
+    assert.equal(generated.dataUrl?.includes(png), true);
+    const edited = await editImage([provider], [attachment], {
+      runId: "run-1",
+      model: "gpt-image-1",
+      prompt: "edit this icon",
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(edited.kind, "png");
+    const generationBody = JSON.parse(seen[0].body);
+    assert.equal(seen[0].url, "/v1/images/generations");
+    assert.equal("response_format" in generationBody, false);
+    assert.equal(seen[1].url, "/v1/images/edits");
+    assert.equal(seen[1].body.includes('name="response_format"'), false);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
 });
 
 test("OpenAI quota errors remain actionable for both streamed error shapes", async () => {

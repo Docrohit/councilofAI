@@ -46,17 +46,21 @@ Telegram behavior:
 
 - `/start` returns setup hints.
 - `/status` reports the active Telegram-linked session.
-- `/new chat` or `/new` detaches the Telegram chat from its current Council
+- `/new chat`, `/new`, `/ new chat` or `/ new` detaches the Telegram chat from its current Council
   session. If that session is still queued/running, Council stops it so the next
   Telegram message can start a fresh session.
 - `/goal 10-180m TEXT` starts or updates a goal-mode run.
 - Ordinary messages start a normal run when no Telegram-linked run is active.
 - Ordinary messages during an active run are posted as board guidance.
+- Ordinary messages after a final answer continue the linked session with the
+  previous goal/answer as context. Use `/new` when you want a clean session.
 - Photos and documents sent with text or captions are downloaded into the same
   attachment pipeline as web uploads. A caption such as `/goal 10-180m review
 this image and fix the mountain colors` starts/updates goal mode and attaches
   the file in one Telegram message.
 - Telegram receives board progress from agents and final/status messages.
+- Generated image artifacts are sent back to Telegram as photos, with a document
+  fallback if Telegram rejects photo upload.
 - User-originated board posts are not echoed back to Telegram.
 
 Configure and save a team before starting Telegram sessions. Other self-hosted

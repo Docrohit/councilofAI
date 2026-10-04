@@ -30,8 +30,14 @@ test("coding connection, real-work permission UI and tool transcript", async ({
   await dialog
     .getByRole("combobox", { name: "Provider", exact: true })
     .selectOption("opencode");
+  await expect(
+    dialog.getByRole("combobox", { name: "Known model", exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("combobox", { name: "Reasoning effort", exact: true }),
+  ).toBeVisible();
   await dialog.getByLabel("Connection name").fill("Project coder");
-  await dialog.getByLabel("Model ID").fill("fixture/test");
+  await dialog.getByRole("textbox", { name: "Model ID" }).fill("fixture/test");
   await expect(
     dialog.getByRole("combobox", { name: "Connection type", exact: true }),
   ).toHaveValue("bridge");

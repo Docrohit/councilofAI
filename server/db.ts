@@ -23,7 +23,8 @@ export function openDb(directory: string) {
     CREATE TABLE IF NOT EXISTS email_tokens(user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, hash TEXT PRIMARY KEY, purpose TEXT NOT NULL, expires INTEGER NOT NULL, created_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS email_token_owner ON email_tokens(user_id,purpose);
     CREATE TABLE IF NOT EXISTS payment_submissions(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), file_name TEXT NOT NULL, mime TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', image BLOB);
-    CREATE INDEX IF NOT EXISTS payment_owner ON payment_submissions(user_id,created_at);`);
+    CREATE INDEX IF NOT EXISTS payment_owner ON payment_submissions(user_id,created_at);
+    CREATE TABLE IF NOT EXISTS skills(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT NOT NULL, content TEXT NOT NULL, resources TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(user_id,name));`);
   const columns = (
     db.prepare("PRAGMA table_info(users)").all() as { name: string }[]
   ).map((c) => c.name);

@@ -120,8 +120,10 @@ rules and runtime permissions. Local code and instructions sent to cloud peers
 are part of their model context. `AGENTS.md` and evidence-based peer expertise
 scores remain distinct from Skills.
 
-Global skill directories, installers/marketplaces, persistent per-session skill
-activation and web Skills management are not implemented. MCP remains planned.
+Account Skills (built-in and user-uploaded for hosted runs; built-ins also in
+native runs) and the Skills Agent are described in [Account Skills](SKILLS.md). Global skill
+directories, installers/marketplaces and persistent per-session skill
+activation are not implemented. MCP remains planned.
 
 ## Source and verification
 

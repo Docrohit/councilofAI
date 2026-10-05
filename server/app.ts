@@ -42,6 +42,14 @@ import {
   startKiteConnect,
   testKiteConnection,
 } from "./kite.ts";
+import {
+  deleteUserSkill,
+  listSkills,
+  MAX_USER_SKILLS,
+  readSkillForOwner,
+  saveUserSkill,
+  setUserSkillEnabled,
+} from "./skills.ts";
 import type { Provider, Run, User } from "../shared/types.ts";
 import {
   PAYMENT_SCREENSHOT_MAX_BYTES,
@@ -114,6 +122,7 @@ const member = z.object({
 const configSchema = z.object({
   sandbox: z.boolean().default(false),
   webResearch: z.boolean().default(false),
+  skillsAgent: z.boolean().default(true),
   goalMode: z.boolean().default(false),
   minGoalMinutes: z.number().int().min(1).max(180).optional(),
   members: z.array(member).min(1).max(32),
@@ -1114,6 +1123,7 @@ export function createApp(directory: string, production = false) {
     // Model-only comparisons must not grant tools exclusively to the council.
     data.config.sandbox = false;
     data.config.webResearch = false;
+    data.config.skillsAgent = false;
     const { customTasks, ...settings } = data;
     const result: BenchmarkResult = {
       id: randomUUID(),
@@ -1481,6 +1491,61 @@ export function createApp(directory: string, production = false) {
       clearInterval(heartbeat);
       unsubscribe();
     });
+  });
+  app.get("/api/skills", (_req, res) =>
+    res.json({
+      skills: listSkills(db, userOf(res).id),
+      maxUserSkills: MAX_USER_SKILLS,
+    }),
+  );
+  app.get("/api/skills/view/:name", (req, res) => {
+    const skill = readSkillForOwner(
+      db,
+      userOf(res).id,
+      String(req.params.name).slice(0, 64),
+    );
+    if (!skill) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json(skill);
+  });
+  app.post("/api/skills", (req, res) => {
+    const data = z
+      .object({
+        files: z
+          .array(
+            z.object({
+              path: z.string().trim().min(1).max(300),
+              content: z.string().max(32_000),
+            }),
+          )
+          .min(1)
+          .max(21),
+      })
+      .parse(req.body);
+    try {
+      res.json(saveUserSkill(db, userOf(res).id, data.files));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  app.patch("/api/skills/:id", (req, res) => {
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
+    if (
+      !setUserSkillEnabled(db, userOf(res).id, String(req.params.id), enabled)
+    ) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json({ ok: true });
+  });
+  app.delete("/api/skills/:id", (req, res) => {
+    if (!deleteUserSkill(db, userOf(res).id, String(req.params.id))) {
+      res.sendStatus(404);
+      return;
+    }
+    res.json({ ok: true });
   });
   app.get("/api/files", (_req, res) =>
     res.json(

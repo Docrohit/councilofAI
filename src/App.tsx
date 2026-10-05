@@ -1,6 +1,7 @@
 import { ChatAttachments, AttachmentPreview } from "./ChatAttachments";
 import type { Attachment } from "../shared/attachments";
 import { BenchmarkWorkspace } from "./BenchmarkWorkspace";
+import { SkillsWorkspace } from "./SkillsWorkspace";
 import { version as councilVersion } from "../package.json";
 import { ProjectWorkspace } from "./ProjectWorkspace";
 import { CommunicationPanel } from "./CommunicationPanel";
@@ -28,6 +29,7 @@ import {
   Globe,
   Layers,
   LoaderCircle,
+  Library,
   LogOut,
   Menu,
   MessageSquare,
@@ -1287,6 +1289,7 @@ export default function App() {
     | "project"
     | "billing"
     | "billingAdmin"
+    | "skills"
     | null
   >(null);
   const [sidebar, setSidebar] = useState(false);
@@ -1676,6 +1679,9 @@ export default function App() {
         <button className="nav-button" onClick={() => setModal("project")}>
           <Terminal size={16} /> Coding project{" "}
           {config.sandbox && <span className="count">On</span>}
+        </button>
+        <button className="nav-button" onClick={() => setModal("skills")}>
+          <Library size={16} /> Skills
         </button>
         <button className="nav-button" onClick={() => setModal("files")}>
           <FileText size={16} /> Workspace files
@@ -2370,6 +2376,11 @@ export default function App() {
         />
       )}
       {modal === "files" && <Files close={() => setModal(null)} />}
+      {modal === "skills" && (
+        <Modal title="Skills" close={() => setModal(null)} wide>
+          <SkillsWorkspace />
+        </Modal>
+      )}
       {modal === "billing" && (
         <Modal title="Billing" close={() => setModal(null)} wide>
           <BillingPanel status={billing} onRefresh={loadBilling} />
@@ -3585,6 +3596,24 @@ function TeamSettings({
           OpenAI API connection and may incur search fees; each search request
           counts toward the model-call budget. Retrieved evidence is shared with
           your team. Maximum 4 searches and 12 page reads per run.
+        </p>
+        <label className="checkbox-label free-delegation">
+          <input
+            type="checkbox"
+            checked={value.skillsAgent !== false}
+            onChange={(e) =>
+              setValue({ ...value, skillsAgent: e.target.checked })
+            }
+          />{" "}
+          Skills Agent — always-on peer that matches skills to the task
+        </label>
+        <p className="field-help">
+          Adds one extra peer on a selected chat model (not an OpenCode coding
+          connection) when the maximum-peers limit and call budget leave room.
+          It loads the
+          skills that fit your goal or message, tells the team how to apply
+          them and checks answers against them. Manage skills from Skills in
+          the sidebar. It uses model calls from the run budget.
         </p>
         <label className="checkbox-label free-delegation">
           <input

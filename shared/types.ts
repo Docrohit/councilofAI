@@ -42,6 +42,8 @@ export interface Member {
 }
 export interface RunConfig {
   webResearch?: boolean;
+  /** Adds the always-on Skills Agent peer; on unless explicitly false. */
+  skillsAgent?: boolean;
   sandbox?: boolean;
   goalMode?: boolean;
   minGoalMinutes?: number;

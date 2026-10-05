@@ -1,33 +1,5 @@
-import { parseDocument } from "yaml";
-import { z } from "zod";
-const nameSchema = z
-  .string()
-  .max(64)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-const frontmatter = z.object({
-  name: nameSchema,
-  description: z.string().min(1).max(1024),
-  license: z.string().optional(),
-  compatibility: z.string().min(1).max(500).optional(),
-  metadata: z.record(z.string(), z.string()).optional(),
-  "allowed-tools": z.string().optional(),
-});
-export function parseSkill(content: string, name: string) {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/.exec(
-    content,
-  );
-  if (!match) throw new Error("SKILL.md requires YAML frontmatter.");
-  const doc = parseDocument(match[1], { uniqueKeys: true });
-  if (doc.errors.length) throw new Error("Invalid Skills YAML frontmatter.");
-  const meta = frontmatter.parse(doc.toJS({ maxAliasCount: 10 }));
-  if (meta.name !== name)
-    throw new Error("Skill name must match its directory.");
-  if (content.length > 32000)
-    throw new Error(
-      "SKILL.md exceeds 32000 characters; move detail to references.",
-    );
-  return { ...meta, body: match[2].trim() };
-}
+import { parseSkill, skillNameSchema as nameSchema } from "../shared/skills.ts";
+export { parseSkill };
 export class ProjectSkills {
   constructor(
     private files: () => Promise<string[]>,

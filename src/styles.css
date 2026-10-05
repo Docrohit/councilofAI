@@ -3312,3 +3312,44 @@ fieldset {
 .kite-steps code {
   overflow-wrap: anywhere;
 }
+.skill-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 8px 0 16px;
+}
+.skill-card {
+  border: 1px solid #3c4630;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.skill-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.skill-card .field-help {
+  margin-top: 6px;
+}
+.skill-card .modal-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.skill-upload {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.skill-viewer {
+  margin-top: 16px;
+}
+.skill-source {
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.6;
+}

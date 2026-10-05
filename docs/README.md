@@ -27,6 +27,8 @@ that their infrastructure is implemented or live.
 - [Architecture](ARCHITECTURE.md): runtime modes, domain state, tools and roadmap.
 - [Benchmarks](BENCHMARKS.md): individual problems, custom proofs and saved comparisons.
 - [LSP and Skills](LSP_SKILLS.md): native configuration, tools and limitations.
+- [Account Skills](SKILLS.md): built-in and uploaded skills, the Skills Agent
+  and the `option_strategy` calculator.
 - [Upgrading](UPGRADING.md): one-command native/self-hosted updates.
 - [Native CLI/TUI](NATIVE.md): model configuration, local projects and upgrades.
 - [RunPod models](RUNPOD_MODELS.md): self-hosted vLLM, SSH tunnel and bridge setup.
@@ -41,6 +43,9 @@ that their infrastructure is implemented or live.
 
 ## Recent handoffs and release notes
 
+- [2026-10-05 Skills release](handoffs/2026-10-05-skills-agent-release.md):
+  account Skills, built-in options skills, the Skills Agent and the
+  `option_strategy` calculator.
 - [2026-10-05 Kite Connect release](handoffs/2026-10-05-kite-connect-release.md):
   per-account Kite login callback, daily session expiry, and agent tools for
   instruments, quotes, historical candles and option chains.

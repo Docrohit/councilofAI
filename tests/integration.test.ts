@@ -73,6 +73,8 @@ const cfg = (
   maxCalls: 32,
   maxOutputTokens: 4096,
   maxMinutes: 2,
+  // Scripted scenarios count peers exactly; Skills Agent tests opt in.
+  skillsAgent: false,
   ...extra,
 });
 async function done(api: any, cookie: string, id: string) {
@@ -2801,4 +2803,151 @@ test("greetings finish with zero peer turns or tool calls and remain visible on 
     );
     assert.equal(follow.data.status, "completed");
     assert.match(follow.data.final, /welcome/);
+  }));
+test("skills API is owner-scoped and the Skills Agent joins runs unless switched off", async () =>
+  harness(async ({ api }: any) => {
+    const owner = await api("/auth/signup", {
+      name: "Skills",
+      email: "skills@example.test",
+      password: "long-password-123",
+    });
+    const other = await api("/auth/signup", {
+      name: "Other",
+      email: "skills-other@example.test",
+      password: "long-password-123",
+    });
+    const upload = await api(
+      "/skills",
+      {
+        files: [
+          {
+            path: "my-checklist/SKILL.md",
+            content:
+              "---\nname: my-checklist\ndescription: Personal review checklist.\n---\nCheck every claim.",
+          },
+          { path: "my-checklist/references/list.md", content: "1. Evidence" },
+        ],
+      },
+      owner.cookie,
+    );
+    assert.equal(upload.status, 200);
+    assert.deepEqual(upload.data.resources, ["references/list.md"]);
+    const listed = (await api("/skills", undefined, owner.cookie)).data.skills;
+    const mine = listed.find((s: any) => s.name === "my-checklist");
+    assert.equal(mine.source, "user");
+    assert(
+      listed.some(
+        (s: any) =>
+          s.name === "option-chain-analysis" && s.source === "builtin",
+      ),
+    );
+    assert.equal(
+      (await api("/skills/view/my-checklist", undefined, owner.cookie)).data
+        .resources["references/list.md"],
+      "1. Evidence",
+    );
+    assert.equal(
+      (await api("/skills/view/my-checklist", undefined, other.cookie)).status,
+      404,
+    );
+    assert.equal(
+      (
+        await api(
+          `/skills/${mine.id}`,
+          { enabled: false },
+          other.cookie,
+          "PATCH",
+        )
+      ).status,
+      404,
+    );
+    assert.equal(
+      (await api(`/skills/${mine.id}`, undefined, other.cookie, "DELETE"))
+        .status,
+      404,
+    );
+    const conflict = await api(
+      "/skills",
+      {
+        files: [
+          {
+            path: "SKILL.md",
+            content:
+              "---\nname: option-buying-strategy\ndescription: Clash.\n---\nx",
+          },
+        ],
+      },
+      owner.cookie,
+    );
+    assert.equal(conflict.status, 400);
+    assert.match(conflict.data.error, /built-in/);
+
+    const p = (await api("/providers", undefined, owner.cookie)).data[0];
+    const withAgent = await api(
+      "/runs",
+      {
+        prompt: "Plan a careful review",
+        config: cfg([p.id], 2, { skillsAgent: true }),
+      },
+      owner.cookie,
+    );
+    const result = await done(api, owner.cookie, withAgent.data.id);
+    const joined = result.events.filter((e: any) => e.type === "agent.join");
+    const skillsAgent = joined.find((e: any) => e.data.id === "skills-agent");
+    assert(skillsAgent, "Skills Agent joins by default");
+    assert.equal(skillsAgent.data.providerId, p.id);
+    assert.match(skillsAgent.data.systemPrompt, /Skills Agent/);
+    // The scripted demo ends three-peer teams in needs_review with or without
+    // the Skills Agent; the run must still finish.
+    assert(["completed", "needs_review"].includes(result.run.status));
+    // A one-peer demo team still completes with the extra Skills Agent.
+    const solo = await api(
+      "/runs",
+      {
+        prompt: "Solo with skills agent",
+        config: cfg([p.id], 1, { skillsAgent: true }),
+      },
+      owner.cookie,
+    );
+    const soloResult = await done(api, owner.cookie, solo.data.id);
+    assert.equal(soloResult.run.status, "completed");
+    assert(
+      soloResult.events.some(
+        (e: any) => e.type === "agent.join" && e.data.id === "skills-agent",
+      ),
+    );
+    // A full agent cap leaves no room for the Skills Agent.
+    const capped = await api(
+      "/runs",
+      {
+        prompt: "Capped team",
+        config: cfg([p.id], 2, { skillsAgent: true, maxAgents: 2 }),
+      },
+      owner.cookie,
+    );
+    const cappedResult = await done(api, owner.cookie, capped.data.id);
+    assert.equal(
+      cappedResult.events.some(
+        (e: any) => e.type === "agent.join" && e.data.id === "skills-agent",
+      ),
+      false,
+    );
+
+    const without = await api(
+      "/runs",
+      { prompt: "No skills agent", config: cfg([p.id], 2) },
+      owner.cookie,
+    );
+    const plain = await done(api, owner.cookie, without.data.id);
+    assert.equal(
+      plain.events.some(
+        (e: any) => e.type === "agent.join" && e.data.id === "skills-agent",
+      ),
+      false,
+    );
+    assert.equal(
+      (await api(`/skills/${mine.id}`, undefined, owner.cookie, "DELETE"))
+        .status,
+      200,
+    );
   }));

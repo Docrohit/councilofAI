@@ -1,6 +1,9 @@
 import type { DB } from "./db.ts";
 import type { Store } from "./store.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { blackScholes, impliedVolatility } from "./options.ts";
+
+export { blackScholes, impliedVolatility };
 
 export interface KiteConfig {
   enabled: boolean;
@@ -735,6 +738,21 @@ function normalizeKiteTime(value: string, end: boolean) {
   );
 }
 
+/** Annualised close-to-close volatility (percent) over the last `period` returns. */
+function historicalVolatility(closes: number[], period: number) {
+  if (closes.length < period + 1) return undefined;
+  const slice = closes.slice(-(period + 1));
+  const returns = slice
+    .slice(1)
+    .map((close, i) => Math.log(close / slice[i]))
+    .filter(Number.isFinite);
+  if (returns.length < period) return undefined;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance =
+    returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (returns.length - 1);
+  return round(Math.sqrt(variance * 252) * 100, 1);
+}
+
 function sma(values: number[], period: number) {
   if (values.length < period) return undefined;
   const slice = values.slice(-period);
@@ -836,6 +854,10 @@ export async function kiteHistorical(
             : undefined,
           sma20: sma(closes, 20),
           sma50: sma(closes, 50),
+          historicalVolatility20Pct:
+            input.interval === "day" ? historicalVolatility(closes, 20) : undefined,
+          historicalVolatility60Pct:
+            input.interval === "day" ? historicalVolatility(closes, 60) : undefined,
           computedBy: "Council from all returned candles",
         }
       : { candles: 0 },
@@ -858,71 +880,6 @@ const INDEX_SPOT: Record<string, string> = {
   BANKEX: "BSE:BANKEX",
 };
 const BFO_UNDERLYINGS = new Set(["SENSEX", "BANKEX", "SENSEX50"]);
-
-function erf(x: number) {
-  // Abramowitz and Stegun 7.1.26, absolute error below 1.5e-7.
-  const sign = x < 0 ? -1 : 1;
-  const t = 1 / (1 + 0.3275911 * Math.abs(x));
-  const y =
-    1 -
-    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) *
-      t +
-      0.254829592) *
-      t *
-      Math.exp(-x * x);
-  return sign * y;
-}
-
-const normCdf = (x: number) => 0.5 * (1 + erf(x / Math.SQRT2));
-
-export function blackScholes(
-  type: "CE" | "PE",
-  spot: number,
-  strike: number,
-  years: number,
-  rate: number,
-  sigma: number,
-) {
-  const sq = sigma * Math.sqrt(years);
-  const d1 =
-    (Math.log(spot / strike) + (rate + (sigma * sigma) / 2) * years) / sq;
-  const d2 = d1 - sq;
-  const discounted = strike * Math.exp(-rate * years);
-  return type === "CE"
-    ? {
-        price: spot * normCdf(d1) - discounted * normCdf(d2),
-        delta: normCdf(d1),
-      }
-    : {
-        price: discounted * normCdf(-d2) - spot * normCdf(-d1),
-        delta: normCdf(d1) - 1,
-      };
-}
-
-export function impliedVolatility(
-  type: "CE" | "PE",
-  price: number,
-  spot: number,
-  strike: number,
-  years: number,
-  rate: number,
-) {
-  if (!(price > 0 && spot > 0 && strike > 0 && years > 0)) return undefined;
-  let lo = 1e-4,
-    hi = 5;
-  if (
-    price < blackScholes(type, spot, strike, years, rate, lo).price ||
-    price > blackScholes(type, spot, strike, years, rate, hi).price
-  )
-    return undefined;
-  for (let i = 0; i < 80; i++) {
-    const mid = (lo + hi) / 2;
-    if (blackScholes(type, spot, strike, years, rate, mid).price > price)
-      hi = mid;
-    else lo = mid;
-  }
-  return (lo + hi) / 2;
-}
 
 export async function kiteOptionChain(
   db: DB,

@@ -45,6 +45,7 @@ Enter a goal to let your agents work in this directory.
 /agents 5                               Five agents, independent of model count
 /budget 40                              Maximum Council model calls
 /web on | off                           Enable/disable public web research
+/skills-agent on | off                  Enable/disable the always-on Skills Agent
 /goal [MIN-MAXm] TEXT                    Set top-priority goal for this session
 /board-msg TEXT                         Post to live board; use @agentname to tag
 /broadcast TEXT                         Alias for /board-msg
@@ -378,6 +379,7 @@ export async function startTui(options: TuiOptions) {
       `${calls}/${config?.maxCalls || 24} calls`,
       `${tokenCount.toLocaleString()} tokens reported`,
       `Web research: ${config?.webResearch ? "on" : "off"}`,
+      `Skills Agent: ${config?.skillsAgent === false ? "off" : "on"}`,
       "",
       "/models · /agents",
       "/sessions · /connections",
@@ -929,6 +931,14 @@ export async function startTui(options: TuiOptions) {
         throw new Error("Use /web on or /web off.");
       config.webResearch = arg === "on";
       notice = `Web research ${config.webResearch ? "enabled; search may incur OpenAI search fees" : "disabled"}. Applies to subsequent goals.`;
+      return;
+    }
+    if (cmd === "skills-agent") {
+      if (!config) throw new Error("Configure a model first.");
+      if (!["on", "off"].includes(arg))
+        throw new Error("Use /skills-agent on or /skills-agent off.");
+      config.skillsAgent = arg === "on";
+      notice = `Skills Agent ${config.skillsAgent ? "enabled" : "disabled"}. Applies to subsequent goals.`;
       return;
     }
     if (cmd === "board-msg" || cmd === "broadcast") {

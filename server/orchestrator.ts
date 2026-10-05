@@ -23,6 +23,14 @@ import { Knowledge } from "./knowledge.ts";
 import { Communication } from "./communication.ts";
 import { Adaptation } from "./adaptation.ts";
 import { editImage, generateImage } from "./media.ts";
+import { analyzeStrategy } from "./options.ts";
+import {
+  loadSkill,
+  skillCatalog,
+  skillsPromptGuide,
+  SKILLS_AGENT_ID,
+  SKILLS_AGENT_INSTRUCTIONS,
+} from "./skills.ts";
 import { workflowGuidance } from "./workflow-guidance.ts";
 import {
   KITE_EXCHANGES,
@@ -283,6 +291,34 @@ const commandSchema = z
           z.object({
             name: z.literal("calculate"),
             expression: z.string().min(1).max(512),
+          }),
+          z.object({ name: z.literal("skill_list") }),
+          z.object({
+            name: z.literal("skill_load"),
+            skill: z.string().min(1).max(64),
+            resource: z.string().max(200).optional(),
+            offset: z.number().int().min(0).optional(),
+          }),
+          z.object({
+            name: z.literal("option_strategy"),
+            spot: z.number().positive(),
+            lotSize: z.number().int().min(1).max(100000),
+            daysToExpiry: z.number().positive().max(3650).optional(),
+            iv: z.number().positive().max(500).optional(),
+            riskFreeRate: z.number().min(0).max(0.2).optional(),
+            legs: z
+              .array(
+                z.object({
+                  type: z.enum(["CE", "PE", "FUT"]),
+                  side: z.enum(["buy", "sell"]),
+                  strike: z.number().positive().optional(),
+                  premium: z.number().min(0),
+                  lots: z.number().int().min(1).max(1000).optional(),
+                  iv: z.number().positive().max(500).optional(),
+                }),
+              )
+              .min(1)
+              .max(8),
           }),
           z.object({
             name: z.literal("solve_linear"),
@@ -583,6 +619,37 @@ export class Orchestrator {
       .providers(userId, true)
       .filter((p) => config.providerIds.includes(p.id));
     const peers = new Map<string, Peer>();
+    // The Skills Agent is a full peer added to new runs unless switched off.
+    // It needs a chat model; OpenCode connections are coding runtimes.
+    const initialMembers = (): Member[] => {
+      const members = config.members;
+      const chatProviders = providers.filter((p) => p.kind !== "opencode");
+      if (
+        config.skillsAgent === false ||
+        run.verificationTools === false ||
+        members.some((m) => m.id === SKILLS_AGENT_ID) ||
+        !chatProviders.length ||
+        // Never exceed the user's agent cap or squeeze the call budget.
+        (config.maxAgents !== null && members.length >= config.maxAgents) ||
+        config.maxCalls < members.length + 3
+      )
+        return members;
+      const providerId =
+        members
+          .map((m) => m.providerId)
+          .find((id) => chatProviders.some((p) => p.id === id)) ||
+        chatProviders[0].id;
+      return [
+        ...members,
+        {
+          id: SKILLS_AGENT_ID,
+          name: "Skills Agent",
+          role: "Skills specialist: matches skills to the task, applies them and checks answers against them",
+          providerId,
+          systemPrompt: SKILLS_AGENT_INSTRUCTIONS,
+        },
+      ];
+    };
     const savedCandidate = run.resumeState?.candidate;
     let candidate: Candidate | undefined = savedCandidate
       ? {
@@ -916,6 +983,10 @@ export class Orchestrator {
         communication: communication.context(viewer.member.id),
         peers: [...peers.values()].map((p) => ({
           ...p.member,
+          // Standing Skills Agent instructions need not repeat in every snapshot.
+          ...(p.member.id === SKILLS_AGENT_ID
+            ? { systemPrompt: undefined }
+            : {}),
           task: p.task,
           status: p.unavailable
             ? "unavailable"
@@ -937,6 +1008,7 @@ export class Orchestrator {
             }
           : null,
       });
+    const announcedSkills = new Set<string>();
     // Serialize project operations across all peers, including complete read/write/exec calls.
     let projectQueue: Promise<unknown> = Promise.resolve();
     const tools = async (
@@ -1163,6 +1235,82 @@ export class Orchestrator {
                     },
                   );
                 return JSON.stringify({ ...result, cached });
+              }
+              if (
+                action.name === "skill_list" ||
+                action.name === "skill_load"
+              ) {
+                if (run.verificationTools === false)
+                  throw new Error("Skills are disabled for this benchmark.");
+                if (action.name === "skill_list") {
+                  const result = { skills: skillCatalog(this.store.db, userId) };
+                  emit("tool.result", {
+                    agentId: peer.member.id,
+                    tool: action.name,
+                    result: JSON.stringify(result),
+                  });
+                  return JSON.stringify(result);
+                }
+                const loaded = loadSkill(
+                  this.store.db,
+                  userId,
+                  action.skill,
+                  action.resource,
+                  action.offset ?? 0,
+                );
+                emit("tool.result", {
+                  agentId: peer.member.id,
+                  tool: action.name,
+                  result: JSON.stringify({
+                    skill: loaded.skill,
+                    source: loaded.source,
+                    resource: loaded.resource,
+                    offset: loaded.offset,
+                    totalChars: loaded.totalChars,
+                    nextOffset: loaded.nextOffset,
+                  }),
+                });
+                if (
+                  !action.resource &&
+                  !action.offset &&
+                  !announcedSkills.has(loaded.skill)
+                ) {
+                  announcedSkills.add(loaded.skill);
+                  communication.broadcast(
+                    peer.member.id,
+                    `Loaded skill ${loaded.skill} (${loaded.source}): ${loaded.description.slice(0, 240)} Peers can load it with skill_load.`,
+                    undefined,
+                    {
+                      kind: "tool-observation",
+                      evidenceSummary: `skill_load ${loaded.skill}`,
+                    },
+                  );
+                }
+                return JSON.stringify(loaded);
+              }
+              if (action.name === "option_strategy") {
+                if (run.verificationTools === false)
+                  throw new Error(
+                    "Verification tools are disabled for this benchmark.",
+                  );
+                const { name: _tool, ...input } = action;
+                const result = analyzeStrategy(input);
+                const serialized = JSON.stringify(result);
+                emit("tool.result", {
+                  agentId: peer.member.id,
+                  tool: action.name,
+                  result: serialized,
+                });
+                communication.broadcast(
+                  peer.member.id,
+                  `Observed option_strategy result for ${JSON.stringify(input.legs)} (spot ${input.spot}, lot ${input.lotSize}): ${serialized.slice(0, 4000)}`,
+                  undefined,
+                  {
+                    kind: "tool-observation",
+                    evidenceSummary: `option_strategy: max profit ${result.maxProfit}, max loss ${result.maxLoss}, breakevens ${result.breakevens.join("/")}`,
+                  },
+                );
+                return serialized;
               }
               if (
                 action.name === "factor_integer" ||
@@ -1792,7 +1940,7 @@ export class Orchestrator {
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : config.sandbox && !this.project ? protocol.replace("You have no browser or shell.", "You have bounded hosted project tools when listed below; no browser.") : nativeProtocol}${config.sandbox && !this.project ? '\nHosted project tools are enabled by the user for this run. They execute in a separate temporary Node.js Linux container, with no network, a 64 MB project and 256 MB RAM. Tools: {"tools":[{"name":"project_tree"},{"name":"project_read","path":"src/main.js"},{"name":"project_write","path":"src/main.js","content":"...","sha":null},{"name":"project_exec","command":"node --test"}]}. Read an existing file first (project_read returns 12000-character pages; use offset to read more) and supply its exact sha when writing; null only creates a new file. Commands have a 30-second limit. Use these tools for multi-file projects and actual tests. Tools run sequentially; another peer may edit between read and write, so handle conflicts. No dependencies can be downloaded; built-in Node tooling is available. Virtual workspace files and a connected OpenCode project are separate from this hosted project. Do not claim completion before inspecting test results. Export the project before it expires.' : ""}${run.verificationTools === false ? "\nDeterministic verification tools are disabled for this benchmark." : '\nDeterministic maths tools are available without a coding project. calculate accepts expression with decimal numbers, parentheses, + - * / % and ^ (integer exponents -64 to 64), returning an exact rational result; no names, code, functions or implicit multiplication. solve_linear accepts coefficients as a rectangular matrix of strings and constants as a string array, up to 8 equations and 8 variables; it returns unique/inconsistent/infinitely_many classification and substitution checks. Example: {"tools":[{"name":"calculate","expression":"0.1+0.2"},{"name":"solve_linear","coefficients":[["2","1"],["1","-1"]],"constants":["5","1"]}]}. Exact integer verification: {"tools":[{"name":"factor_integer","integer":"360"}]}. It accepts positive integers up to 1000000000000 and returns prime factorization, primality, divisor count and a reconstructed product. Use it before asserting primality or a divisor list; cite the actual result. Results are automatically posted to the shared board so peers can reuse them.'}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}${peer.member.systemPrompt ? `\nAGENT INSTRUCTIONS: ${peer.member.systemPrompt}` : ""}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\n${kitePromptGuide(this.store.db, this.store, userId)}
+            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : config.sandbox && !this.project ? protocol.replace("You have no browser or shell.", "You have bounded hosted project tools when listed below; no browser.") : nativeProtocol}${config.sandbox && !this.project ? '\nHosted project tools are enabled by the user for this run. They execute in a separate temporary Node.js Linux container, with no network, a 64 MB project and 256 MB RAM. Tools: {"tools":[{"name":"project_tree"},{"name":"project_read","path":"src/main.js"},{"name":"project_write","path":"src/main.js","content":"...","sha":null},{"name":"project_exec","command":"node --test"}]}. Read an existing file first (project_read returns 12000-character pages; use offset to read more) and supply its exact sha when writing; null only creates a new file. Commands have a 30-second limit. Use these tools for multi-file projects and actual tests. Tools run sequentially; another peer may edit between read and write, so handle conflicts. No dependencies can be downloaded; built-in Node tooling is available. Virtual workspace files and a connected OpenCode project are separate from this hosted project. Do not claim completion before inspecting test results. Export the project before it expires.' : ""}${run.verificationTools === false ? "\nDeterministic verification tools are disabled for this benchmark." : '\nDeterministic maths tools are available without a coding project. calculate accepts expression with decimal numbers, parentheses, + - * / % and ^ (integer exponents -64 to 64), returning an exact rational result; no names, code, functions or implicit multiplication. solve_linear accepts coefficients as a rectangular matrix of strings and constants as a string array, up to 8 equations and 8 variables; it returns unique/inconsistent/infinitely_many classification and substitution checks. Example: {"tools":[{"name":"calculate","expression":"0.1+0.2"},{"name":"solve_linear","coefficients":[["2","1"],["1","-1"]],"constants":["5","1"]}]}. Exact integer verification: {"tools":[{"name":"factor_integer","integer":"360"}]}. It accepts positive integers up to 1000000000000 and returns prime factorization, primality, divisor count and a reconstructed product. Use it before asserting primality or a divisor list; cite the actual result. Results are automatically posted to the shared board so peers can reuse them. Option strategy maths: {"tools":[{"name":"option_strategy","spot":24850,"lotSize":75,"daysToExpiry":14,"legs":[{"type":"CE","side":"buy","strike":24900,"premium":180,"iv":13.5},{"type":"CE","side":"sell","strike":25200,"premium":70,"iv":12.8}]}]} returns net debit/credit, max profit and loss, breakevens, an expiry payoff table, probability of profit and Greeks for 1-8 single-expiry CE/PE/FUT legs. Use it instead of computing option payoffs by hand.' + skillsPromptGuide(this.store.db, userId)}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}${peer.member.systemPrompt ? `\nAGENT INSTRUCTIONS: ${peer.member.systemPrompt}` : ""}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\n${kitePromptGuide(this.store.db, this.store, userId)}
 Image media tools may be available with a direct OpenAI image-capable connection: {"tools":[{"name":"media_edit_image","prompt":"precise edit instruction"},{"name":"media_generate_image","prompt":"precise generation instruction"}]}. Generated images are attached to later turns and must be reviewed before acceptance.\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
           },
           {
@@ -2025,7 +2173,7 @@ Image media tools may be available with a direct OpenAI image-capable connection
       status("running");
       emit("phase", { name: "Open team discussion" });
       for (const member of run.resumeState?.peers.map((p) => p.member) ||
-        config.members) {
+        initialMembers()) {
         const previous = run.resumeState?.peers.find(
           (p) => p.member.id === member.id,
         );

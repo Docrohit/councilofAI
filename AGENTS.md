@@ -113,8 +113,10 @@ place and do not describe them as deployed or released without verifying the
 target installation. See [known issues](docs/KNOWN_ISSUES.md).
 
 Planned commercial accounts/trials, billing, PostgreSQL, native desktop apps,
-MCP and hosted LSP/Skills are not implemented. Native LSP and project Skills are
-implemented in the candidate source; see docs/LSP_SKILLS.md. Current standalone native mode
+MCP and hosted LSP are not implemented. Native LSP and project Skills are
+implemented in the candidate source; see docs/LSP_SKILLS.md. Hosted account
+Skills, built-in options skills and the Skills Agent are described in
+docs/SKILLS.md. Current standalone native mode
 is account-free. Evidence labels for the board remain explicitly deferred.
 
 At handoff report the changed files, reasoning, tests actually run, review status,

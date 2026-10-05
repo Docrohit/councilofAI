@@ -3298,3 +3298,17 @@ fieldset {
 .run-attachments {
   margin-bottom: 0.8rem;
 }
+.kite-steps summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.kite-steps ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.kite-steps li + li {
+  margin-top: 4px;
+}
+.kite-steps code {
+  overflow-wrap: anywhere;
+}

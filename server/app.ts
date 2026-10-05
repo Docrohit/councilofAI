@@ -35,9 +35,12 @@ import { complete } from "./providers.ts";
 import { TelegramBridge } from "./telegram.ts";
 import {
   clearKite,
+  completeKiteConnect,
   kiteStatus,
   refreshKiteAccessToken,
   saveKite,
+  startKiteConnect,
+  testKiteConnection,
 } from "./kite.ts";
 import type { Provider, Run, User } from "../shared/types.ts";
 import {
@@ -395,6 +398,48 @@ export function createApp(directory: string, production = false) {
     }
     cookie(res, issueSession(userId, "cookie"));
     res.redirect("/?confirmed=1");
+  });
+  // Kite redirects here from kite.zerodha.com. The SameSite=strict session
+  // cookie is not sent on that cross-site navigation, so the account is found
+  // through the single-use state created by /api/integrations/kite/connect.
+  app.get("/api/integrations/kite/callback", authLimit, async (req, res) => {
+    const page = (status: number, title: string, message: string) =>
+      res
+        .status(status)
+        .type("html")
+        .send(
+          `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title></head><body><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="/">Return to Council</a></p></body></html>`,
+        );
+    const query = z
+      .object({
+        state: z.string().trim().min(16).max(200),
+        request_token: z.string().trim().min(10).max(500),
+        status: z.string().max(40).optional(),
+      })
+      .safeParse(req.query);
+    if (!query.success || (query.data.status && query.data.status !== "success")) {
+      page(
+        400,
+        "Kite login was not completed",
+        "Kite did not return a usable login. Open Connections in Council and click Connect Kite again. If this keeps happening, check that your Kite app's Redirect URL matches the one shown in Council.",
+      );
+      return;
+    }
+    try {
+      const { status } = await completeKiteConnect(
+        db,
+        store,
+        query.data.state,
+        query.data.request_token,
+      );
+      page(
+        200,
+        "Kite connected",
+        `Kite is connected for today${status.kiteUserId ? ` as ${status.kiteUserId}` : ""}. Kite ends every session at the next 6 AM IST, so connect again each trading day.`,
+      );
+    } catch (e) {
+      page(400, "Kite connection failed", (e as Error).message);
+    }
   });
   app.post("/api/auth/signup", authLimit, async (req, res) => {
     if (process.env.ALLOW_SIGNUP === "false") {
@@ -832,30 +877,23 @@ export function createApp(directory: string, production = false) {
   app.get("/api/integrations/kite", (_req, res) =>
     res.json(kiteStatus(db, store, userOf(res).id, appOrigin)),
   );
-  app.get("/api/integrations/kite/callback", async (req, res) => {
-    const requestToken = z.string().trim().min(10).max(500).safeParse(
-      req.query.request_token,
-    );
-    if (!requestToken.success) {
-      res.status(400).send("Kite did not return a request_token.");
-      return;
-    }
+  app.post("/api/integrations/kite/connect", (_req, res) => {
     try {
-      await refreshKiteAccessToken(
-        db,
-        store,
-        userOf(res).id,
-        requestToken.data,
-      );
-      res
-        .status(200)
-        .send(
-          "Kite is connected for today. You can close this tab and return to Council.",
-        );
+      res.json(startKiteConnect(db, store, userOf(res).id));
     } catch (e) {
-      res
-        .status(400)
-        .send(`Kite refresh failed: ${(e as Error).message}`);
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  app.post("/api/integrations/kite/test", async (_req, res) => {
+    const userId = userOf(res).id;
+    try {
+      await testKiteConnection(db, store, userId, AbortSignal.timeout(20_000));
+      res.json(kiteStatus(db, store, userId, appOrigin));
+    } catch (e) {
+      res.status(400).json({
+        error: (e as Error).message,
+        status: kiteStatus(db, store, userId, appOrigin),
+      });
     }
   });
   app.put("/api/integrations/kite", (req, res) => {
@@ -868,7 +906,8 @@ export function createApp(directory: string, production = false) {
       })
       .parse(req.body);
     try {
-      res.json(saveKite(db, store, userOf(res).id, data));
+      saveKite(db, store, userOf(res).id, data);
+      res.json(kiteStatus(db, store, userOf(res).id, appOrigin));
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
@@ -880,14 +919,13 @@ export function createApp(directory: string, production = false) {
       })
       .parse(req.body);
     try {
-      res.json(
-        await refreshKiteAccessToken(
-          db,
-          store,
-          userOf(res).id,
-          data.requestToken,
-        ),
+      await refreshKiteAccessToken(
+        db,
+        store,
+        userOf(res).id,
+        data.requestToken,
       );
+      res.json(kiteStatus(db, store, userOf(res).id, appOrigin));
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }
@@ -1636,4 +1674,14 @@ export function createApp(directory: string, production = false) {
     });
   });
   return { app, db, store, engine, benchmarks };
+}
+
+function escapeHtml(value: string) {
+  return value.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ]!,
+  );
 }

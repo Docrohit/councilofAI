@@ -41,6 +41,9 @@ that their infrastructure is implemented or live.
 
 ## Recent handoffs and release notes
 
+- [2026-10-05 Kite Connect release](handoffs/2026-10-05-kite-connect-release.md):
+  per-account Kite login callback, daily session expiry, and agent tools for
+  instruments, quotes, historical candles and option chains.
 - [2026-10-04 commit log](handoffs/2026-10-04-commit-log.md): Telegram,
   model/reasoning, billing, password reset, image delivery and Kite refresh
   commits from the Oct 4 hosted release work.

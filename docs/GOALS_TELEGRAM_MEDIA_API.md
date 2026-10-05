@@ -107,13 +107,57 @@ must report that blocker instead of claiming pixels were changed.
 
 ## Market Data And Options
 
-Council can store a read-only Zerodha Kite data connection in **Connections**.
-Paste the Kite `api_key` and the fresh daily `access_token` after reconnecting.
-Kite is exposed only through data tools:
+Each Council account can connect its own Zerodha Kite Connect app in
+**Connections**. Setup:
 
-- `kite_quote`
-- `kite_historical`
-- `kite_option_chain`
+1. On developers.kite.trade, set the app's Redirect URL to the callback URL
+   shown in Connections (`<APP_ORIGIN>/api/integrations/kite/callback`).
+   Historical candles need the app's Historical Chart data add-on.
+2. Paste the app's API key and API secret and click **Save Kite app**. Both are
+   stored encrypted; changing either clears the previous session.
+3. Click **Connect Kite** and sign in to Zerodha. The login URL carries a
+   single-use, 15-minute `state` value in `redirect_params`. The public callback
+   uses that value to find the account, because the `SameSite=strict` session
+   cookie is not sent when Kite redirects back. The callback exchanges the
+   `request_token` for the day's access token and records the Kite user ID.
+
+Kite ends every session at 06:00 IST, so users connect once per trading day.
+Council treats tokens issued before the latest 06:00 IST as expired. A Kite
+`TokenException` clears the saved token and shows a reconnect message. If an
+app's Redirect URL must point at another site, the manual section accepts a
+`request_token` copied from the address bar or a pasted access token.
+
+Agents see the Kite tool instructions only while the account is connected. A
+configured but disconnected account gets a short note telling agents not to call
+the tools and to ask the user to reconnect. The tools are:
+
+- `kite_instruments`: search symbols, instrument tokens, expiries and lot
+  sizes on NSE, BSE, NFO, BFO, CDS, BCD or MCX.
+- `kite_quote`: compact `full`, `ohlc` or `ltp` quotes for up to 100
+  instruments. Full quotes include the best bid/ask, without full depth.
+- `kite_historical`: OHLCV candles by `EXCHANGE:SYMBOL` or numeric token, with
+  optional OI/continuous data. It returns a summary over all candles: change,
+  range, average volume, SMA20 and SMA50. Only the latest 120 candles are
+  returned by default (maximum 250), trimmed further to fit the tool-result
+  budget.
+- `kite_option_chain`: strikes nearest spot for the nearest or requested
+  expiry. Each strike has CE/PE LTP, bid/ask, volume, OI, IV and delta. The
+  result also includes ATM strike, lot size, put-call OI ratio, highest-OI
+  strikes and max pain. Index spot instruments are inferred for NIFTY,
+  BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50, SENSEX and BANKEX. Other
+  underlyings default to `NSE:<SYMBOL>` (or `BSE:<SYMBOL>` on BFO); pass
+  `spotInstrument` when that is not the right spot symbol, for example
+  SENSEX50. Expiries whose 15:30 IST close has passed are skipped.
+
+IV and delta are Black-Scholes estimates made by Council, not Kite data. They
+assume a 6.5% risk-free rate (overridable with `riskFreeRate`), no dividends
+and expiry at 15:30 IST. The summary figures cover only the returned strikes.
+Instrument dumps are public reference data. They are cached in process memory
+per exchange per trading day and shared across accounts. Each account still
+needs its own connected session to use them. Quote and historical requests are
+spaced per user to stay within Kite's limits (quotes at 1 per second,
+historical at 3 per second). The shared instrument download is not spaced. All
+requests retry briefly on HTTP 429.
 
 There are no order-placement tools. Agents must never place, modify or cancel
 trades. For stock and options goals, agents should combine user-provided data,
@@ -145,6 +189,11 @@ Hosted authenticated API clients can use the same primitives as the web app.
   - Telegram bridge status/configuration
 - `GET/PUT/DELETE /api/integrations/kite`
   - read-only Kite market-data credential status/configuration
+- `POST /api/integrations/kite/connect`, `POST /api/integrations/kite/test`
+  - start a Kite login with single-use state; check the session via
+    `/user/profile`
+- `GET /api/integrations/kite/callback`
+  - public Kite redirect target, authorized only by the single-use state
 
 These endpoints are a practical base for an MCP server. MCP should wrap them as
 tools such as `start_goal`, `send_board_message`, `attach_file`,

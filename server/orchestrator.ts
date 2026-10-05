@@ -24,7 +24,15 @@ import { Communication } from "./communication.ts";
 import { Adaptation } from "./adaptation.ts";
 import { editImage, generateImage } from "./media.ts";
 import { workflowGuidance } from "./workflow-guidance.ts";
-import { kiteHistorical, kiteOptionChain, kiteQuote } from "./kite.ts";
+import {
+  KITE_EXCHANGES,
+  KITE_INTERVALS,
+  kiteHistorical,
+  kiteInstrumentSearch,
+  kiteOptionChain,
+  kitePromptGuide,
+  kiteQuote,
+} from "./kite.ts";
 
 const evidence = z.array(z.string().min(1).max(2000)).min(1).max(5);
 const commandSchema = z
@@ -218,21 +226,36 @@ const commandSchema = z
           z.object({
             name: z.literal("kite_quote"),
             instruments: z.array(z.string().min(3).max(80)).min(1).max(100),
+            mode: z.enum(["full", "ohlc", "ltp"]).optional(),
+          }),
+          z.object({
+            name: z.literal("kite_instruments"),
+            query: z.string().min(1).max(60),
+            exchange: z.enum(KITE_EXCHANGES).optional(),
+            limit: z.number().int().min(1).max(25).optional(),
           }),
           z.object({
             name: z.literal("kite_option_chain"),
             underlying: z.string().min(1).max(40),
-            expiry: z.string().max(20).optional(),
-            exchange: z.string().max(12).optional(),
+            expiry: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
+            exchange: z.enum(KITE_EXCHANGES).optional(),
             spotInstrument: z.string().max(80).optional(),
             maxStrikes: z.number().int().min(2).max(40).optional(),
+            riskFreeRate: z.number().min(0).max(0.2).optional(),
           }),
           z.object({
             name: z.literal("kite_historical"),
-            instrumentToken: z.string().min(1).max(40),
+            instrument: z.string().min(3).max(80).optional(),
+            instrumentToken: z.string().min(1).max(40).optional(),
             from: z.string().min(10).max(30),
             to: z.string().min(10).max(30),
-            interval: z.string().min(2).max(20),
+            interval: z.enum(KITE_INTERVALS),
+            oi: z.boolean().optional(),
+            continuous: z.boolean().optional(),
+            maxCandles: z.number().int().min(10).max(250).optional(),
           }),
           z.object({
             name: z.literal("media_generate_image"),
@@ -927,44 +950,64 @@ export class Orchestrator {
             try {
               if (
                 action.name === "kite_quote" ||
+                action.name === "kite_instruments" ||
                 action.name === "kite_option_chain" ||
                 action.name === "kite_historical"
               ) {
+                const db = this.store.db;
                 const result =
                   action.name === "kite_quote"
                     ? await kiteQuote(
-                        this.store.db,
+                        db,
                         this.store,
                         userId,
                         action.instruments,
                         signal,
+                        action.mode,
                       )
-                    : action.name === "kite_historical"
-                      ? await kiteHistorical(
-                          this.store.db,
+                    : action.name === "kite_instruments"
+                      ? await kiteInstrumentSearch(
+                          db,
                           this.store,
                           userId,
                           {
-                            instrumentToken: action.instrumentToken,
-                            from: action.from,
-                            to: action.to,
-                            interval: action.interval,
+                            query: action.query,
+                            exchange: action.exchange,
+                            limit: action.limit,
                           },
                           signal,
                         )
-                      : await kiteOptionChain(
-                          this.store.db,
-                          this.store,
-                          userId,
-                          {
-                            underlying: action.underlying,
-                            expiry: action.expiry,
-                            exchange: action.exchange,
-                            spotInstrument: action.spotInstrument,
-                            maxStrikes: action.maxStrikes,
-                          },
-                          signal,
-                        );
+                      : action.name === "kite_historical"
+                        ? await kiteHistorical(
+                            db,
+                            this.store,
+                            userId,
+                            {
+                              instrument: action.instrument,
+                              instrumentToken: action.instrumentToken,
+                              from: action.from,
+                              to: action.to,
+                              interval: action.interval,
+                              oi: action.oi,
+                              continuous: action.continuous,
+                              maxCandles: action.maxCandles,
+                            },
+                            signal,
+                          )
+                        : await kiteOptionChain(
+                            db,
+                            this.store,
+                            userId,
+                            {
+                              underlying: action.underlying,
+                              expiry: action.expiry,
+                              exchange: action.exchange,
+                              spotInstrument: action.spotInstrument,
+                              maxStrikes: action.maxStrikes,
+                              riskFreeRate: action.riskFreeRate,
+                            },
+                            signal,
+                          );
                 const serialized = JSON.stringify(result);
                 emit("tool.result", {
                   agentId: peer.member.id,
@@ -1749,7 +1792,8 @@ export class Orchestrator {
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : config.sandbox && !this.project ? protocol.replace("You have no browser or shell.", "You have bounded hosted project tools when listed below; no browser.") : nativeProtocol}${config.sandbox && !this.project ? '\nHosted project tools are enabled by the user for this run. They execute in a separate temporary Node.js Linux container, with no network, a 64 MB project and 256 MB RAM. Tools: {"tools":[{"name":"project_tree"},{"name":"project_read","path":"src/main.js"},{"name":"project_write","path":"src/main.js","content":"...","sha":null},{"name":"project_exec","command":"node --test"}]}. Read an existing file first (project_read returns 12000-character pages; use offset to read more) and supply its exact sha when writing; null only creates a new file. Commands have a 30-second limit. Use these tools for multi-file projects and actual tests. Tools run sequentially; another peer may edit between read and write, so handle conflicts. No dependencies can be downloaded; built-in Node tooling is available. Virtual workspace files and a connected OpenCode project are separate from this hosted project. Do not claim completion before inspecting test results. Export the project before it expires.' : ""}${run.verificationTools === false ? "\nDeterministic verification tools are disabled for this benchmark." : '\nDeterministic maths tools are available without a coding project. calculate accepts expression with decimal numbers, parentheses, + - * / % and ^ (integer exponents -64 to 64), returning an exact rational result; no names, code, functions or implicit multiplication. solve_linear accepts coefficients as a rectangular matrix of strings and constants as a string array, up to 8 equations and 8 variables; it returns unique/inconsistent/infinitely_many classification and substitution checks. Example: {"tools":[{"name":"calculate","expression":"0.1+0.2"},{"name":"solve_linear","coefficients":[["2","1"],["1","-1"]],"constants":["5","1"]}]}. Exact integer verification: {"tools":[{"name":"factor_integer","integer":"360"}]}. It accepts positive integers up to 1000000000000 and returns prime factorization, primality, divisor count and a reconstructed product. Use it before asserting primality or a divisor list; cite the actual result. Results are automatically posted to the shared board so peers can reuse them.'}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}${peer.member.systemPrompt ? `\nAGENT INSTRUCTIONS: ${peer.member.systemPrompt}` : ""}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\nRead-only market data tools may be available when the user configured Kite: {"tools":[{"name":"kite_quote","instruments":["NSE:INFY"]},{"name":"kite_option_chain","underlying":"NIFTY","spotInstrument":"NSE:NIFTY 50","maxStrikes":12}]}. Kite tools are data-only. You must never place, modify, cancel or imply execution of trades. Image media tools may be available with a direct OpenAI image-capable connection: {"tools":[{"name":"media_edit_image","prompt":"precise edit instruction"},{"name":"media_generate_image","prompt":"precise generation instruction"}]}. Generated images are attached to later turns and must be reviewed before acceptance.\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
+            content: `${provider.kind === "opencode" ? protocol.replace("You have no browser or shell.", "You have OpenCode native tools in the connected project. Use those for real code search, edits, commands, tests, LSP, and configured MCP tools. Read project instructions first. Claim work and coordinate before editing. Publish exact tool results to the shared ledger. Never claim tests passed without their output. Council virtual files are separate from this real project.") : config.sandbox && !this.project ? protocol.replace("You have no browser or shell.", "You have bounded hosted project tools when listed below; no browser.") : nativeProtocol}${config.sandbox && !this.project ? '\nHosted project tools are enabled by the user for this run. They execute in a separate temporary Node.js Linux container, with no network, a 64 MB project and 256 MB RAM. Tools: {"tools":[{"name":"project_tree"},{"name":"project_read","path":"src/main.js"},{"name":"project_write","path":"src/main.js","content":"...","sha":null},{"name":"project_exec","command":"node --test"}]}. Read an existing file first (project_read returns 12000-character pages; use offset to read more) and supply its exact sha when writing; null only creates a new file. Commands have a 30-second limit. Use these tools for multi-file projects and actual tests. Tools run sequentially; another peer may edit between read and write, so handle conflicts. No dependencies can be downloaded; built-in Node tooling is available. Virtual workspace files and a connected OpenCode project are separate from this hosted project. Do not claim completion before inspecting test results. Export the project before it expires.' : ""}${run.verificationTools === false ? "\nDeterministic verification tools are disabled for this benchmark." : '\nDeterministic maths tools are available without a coding project. calculate accepts expression with decimal numbers, parentheses, + - * / % and ^ (integer exponents -64 to 64), returning an exact rational result; no names, code, functions or implicit multiplication. solve_linear accepts coefficients as a rectangular matrix of strings and constants as a string array, up to 8 equations and 8 variables; it returns unique/inconsistent/infinitely_many classification and substitution checks. Example: {"tools":[{"name":"calculate","expression":"0.1+0.2"},{"name":"solve_linear","coefficients":[["2","1"],["1","-1"]],"constants":["5","1"]}]}. Exact integer verification: {"tools":[{"name":"factor_integer","integer":"360"}]}. It accepts positive integers up to 1000000000000 and returns prime factorization, primality, divisor count and a reconstructed product. Use it before asserting primality or a divisor list; cite the actual result. Results are automatically posted to the shared board so peers can reuse them.'}\nNAME: ${peer.member.name}\nROLE: ${peer.member.role}${peer.member.systemPrompt ? `\nAGENT INSTRUCTIONS: ${peer.member.systemPrompt}` : ""}\nDEPTH: ${peer.member.depth}\nPHASE: ${final ? "synthesis" : "discussion"}\nTURN: ${peer.turns}\nAvailable team providers: ${JSON.stringify(providers.map((p) => ({ id: p.id, model: p.model })))}\n${kitePromptGuide(this.store.db, this.store, userId)}
+Image media tools may be available with a direct OpenAI image-capable connection: {"tools":[{"name":"media_edit_image","prompt":"precise edit instruction"},{"name":"media_generate_image","prompt":"precise generation instruction"}]}. Generated images are attached to later turns and must be reviewed before acceptance.\nResource limits: ${config.maxAgents ?? "no fixed cap on"} total agents, spawn depth ${config.maxDepth ?? "unbounded"}, ${config.maxCalls - calls} calls remaining. These are resource ceilings, not an organizational hierarchy.`,
           },
           {
             role: "user",

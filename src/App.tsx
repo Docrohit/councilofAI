@@ -2573,7 +2573,23 @@ function Connections({
   const [kiteRequestToken, setKiteRequestToken] = useState("");
   const [kiteAccessToken, setKiteAccessToken] = useState("");
   const [kiteSaving, setKiteSaving] = useState(false);
+  const [kiteError, setKiteError] = useState("");
+  const [kiteNotice, setKiteNotice] = useState("");
   const shortcut = modelShortcuts.find((item) => item.id === shortcutId);
+  async function kiteAction(work: () => Promise<string>) {
+    setKiteSaving(true);
+    setKiteError("");
+    setKiteNotice("");
+    try {
+      const notice = await work();
+      setKiteNotice(notice);
+    } catch (e) {
+      setKiteError((e as Error).message);
+    } finally {
+      setKite(await api("/integrations/kite").catch(() => kite));
+      setKiteSaving(false);
+    }
+  }
   useEffect(() => {
     api("/integrations/telegram")
       .then(setTelegram)
@@ -2800,26 +2816,71 @@ function Connections({
         </section>
       )}
       {!show && (
-        <section className="connection-form">
+        <section className="connection-form kite-connection">
           <div className="resource-heading">
             <h3>Zerodha Kite data</h3>
             <span>
-              {kite?.enabled
-                ? "Enabled · read-only tools"
-                : "Optional market data"}
+              {kite?.connected
+                ? `Connected${kite.kiteUserId ? ` · ${kite.kiteUserId}` : ""} · read-only`
+                : kite?.hasAccessToken && kite?.tokenExpired
+                  ? "Session expired · connect again"
+                  : kite?.canConnect
+                    ? "App saved · not connected today"
+                    : "Optional market data"}
             </span>
           </div>
           <p className="field-help">
-            Adds read-only Kite tools for quotes, historical candles and option
-            chain data. Council never places, modifies or cancels orders. Paste
-            the current Kite Connect app key and secret from Zerodha Developer
-            Console, then refresh the request token after your morning Kite
-            login.
+            Lets your agents read live quotes, historical candles and option
+            chains through your own Kite Connect app. Council never places,
+            modifies or cancels orders. Kite ends every session at 6 AM IST,
+            so click Connect Kite once each trading day.
           </p>
-          {kite?.accessTokenUpdatedAt && (
+          <details className="field-help kite-steps" open={!kite?.canConnect}>
+            <summary>First-time setup</summary>
+            <ol>
+              <li>
+                Open your app at{" "}
+                <a
+                  href="https://developers.kite.trade/apps"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  developers.kite.trade
+                </a>
+                . Candles need the Historical Chart data add-on.
+              </li>
+              {kite?.callbackUrl && (
+                <li>
+                  Set the app&apos;s Redirect URL to{" "}
+                  <code>{kite.callbackUrl}</code>{" "}
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(kite.callbackUrl);
+                        setKiteNotice("Redirect URL copied.");
+                      } catch {
+                        setKiteNotice("Copy the Redirect URL manually.");
+                      }
+                    }}
+                  >
+                    Copy
+                  </button>
+                </li>
+              )}
+              <li>Paste the app&apos;s API key and API secret below and save.</li>
+              <li>
+                Click Connect Kite and sign in to Zerodha. Kite sends you back
+                to Council connected.
+              </li>
+            </ol>
+          </details>
+          {kite?.connected && kite?.accessTokenUpdatedAt && (
             <p className="field-help">
-              Last token refresh:{" "}
-              {new Date(kite.accessTokenUpdatedAt).toLocaleString()}
+              Connected{kite.kiteUserName ? ` as ${kite.kiteUserName}` : ""} at{" "}
+              {new Date(kite.accessTokenUpdatedAt).toLocaleString()}. Valid
+              until the next 6 AM IST.
             </p>
           )}
           <div className="form-grid">
@@ -2851,128 +2912,77 @@ function Connections({
                 onChange={(e) => setKiteApiSecret(e.target.value)}
               />
             </label>
-            <label>
-              Request token
-              <input
-                type="password"
-                value={kiteRequestToken}
-                autoComplete="off"
-                placeholder="Paste request_token after Kite login"
-                onChange={(e) => setKiteRequestToken(e.target.value)}
-              />
-            </label>
-            <label>
-              Access token
-              <input
-                type="password"
-                value={kiteAccessToken}
-                autoComplete="off"
-                placeholder={
-                  kite?.hasAccessToken
-                    ? "Paste new token or leave blank"
-                    : "Today's access_token"
-                }
-                onChange={(e) => setKiteAccessToken(e.target.value)}
-              />
-            </label>
           </div>
           {kite?.lastError && (
             <div className="error">Kite: {kite.lastError}</div>
           )}
-          {kite?.callbackUrl && (
-            <p className="field-help">
-              Kite app redirect URL for direct callback: {kite.callbackUrl}
-            </p>
-          )}
-          {kite?.hasApiKey && kite?.hasApiSecret && !kite?.hasAccessToken && (
-            <p className="field-help">
-              If Kite opens with “Invalid api_key”, clear Kite and paste the
-              current app key and secret from developers.kite.trade.
-            </p>
-          )}
+          {kiteError && <div className="error">{kiteError}</div>}
+          {kiteNotice && <div className="success-note">{kiteNotice}</div>}
           <div className="modal-actions">
-            <button
-              className="quiet-button bordered"
-              disabled={kiteSaving}
-              onClick={async () => {
-                setKiteSaving(true);
-                setError("");
-                try {
-                  setKite(
+            {(kiteApiKey.trim() || kiteApiSecret.trim()) && (
+              <button
+                className="quiet-button bordered"
+                disabled={kiteSaving}
+                onClick={() =>
+                  kiteAction(async () => {
                     await api("/integrations/kite", "PUT", {
                       apiKey: kiteApiKey || undefined,
                       apiSecret: kiteApiSecret || undefined,
-                      accessToken: kiteAccessToken || undefined,
-                      enabled: kiteAccessToken ? true : !!kite?.enabled,
-                    }),
-                  );
-                  setKiteApiKey("");
-                  setKiteApiSecret("");
-                  setKiteAccessToken("");
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setKiteSaving(false);
+                      enabled: false,
+                    });
+                    setKiteApiKey("");
+                    setKiteApiSecret("");
+                    return "Kite app saved. Click Connect Kite to sign in for today.";
+                  })
                 }
-              }}
-            >
-              {kiteSaving
-                ? "Saving…"
-                : kiteAccessToken
-                  ? "Save and enable"
-                  : "Save Kite settings"}
-            </button>
-            {kite?.loginUrl && (
-              <a
-                className="quiet-button bordered"
-                href={kite.loginUrl}
-                target="_blank"
-                rel="noreferrer"
               >
-                Open Kite login <ArrowUpRight size={14} />
-              </a>
+                Save Kite app
+              </button>
             )}
-            <button
-              className="quiet-button bordered"
-              disabled={kiteSaving || !kiteRequestToken.trim()}
-              onClick={async () => {
-                setKiteSaving(true);
-                setError("");
-                try {
-                  setKite(
-                    await api("/integrations/kite/request-token", "POST", {
-                      requestToken: kiteRequestToken,
-                    }),
-                  );
-                  setKiteRequestToken("");
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setKiteSaving(false);
+            {kite?.canConnect && (
+              <button
+                className="quiet-button bordered"
+                disabled={kiteSaving}
+                onClick={() =>
+                  kiteAction(async () => {
+                    const { loginUrl } = await api(
+                      "/integrations/kite/connect",
+                      "POST",
+                      {},
+                    );
+                    window.location.assign(loginUrl);
+                    return "Opening Kite login…";
+                  })
                 }
-              }}
-            >
-              Refresh token
-            </button>
+              >
+                {kite?.connected ? "Reconnect Kite" : "Connect Kite"}{" "}
+                <ArrowUpRight size={14} />
+              </button>
+            )}
+            {kite?.connected && (
+              <button
+                className="quiet-button bordered"
+                disabled={kiteSaving}
+                onClick={() =>
+                  kiteAction(async () => {
+                    const status = await api("/integrations/kite/test", "POST", {});
+                    return `Kite answered for ${status.kiteUserName || status.kiteUserId || "your account"}.`;
+                  })
+                }
+              >
+                Test connection
+              </button>
+            )}
             {kite?.enabled && (
               <button
                 className="quiet-button"
                 disabled={kiteSaving}
-                onClick={async () => {
-                  setKiteSaving(true);
-                  setError("");
-                  try {
-                    setKite(
-                      await api("/integrations/kite", "PUT", {
-                        enabled: false,
-                      }),
-                    );
-                  } catch (e) {
-                    setError((e as Error).message);
-                  } finally {
-                    setKiteSaving(false);
-                  }
-                }}
+                onClick={() =>
+                  kiteAction(async () => {
+                    await api("/integrations/kite", "PUT", { enabled: false });
+                    return "Kite tools disabled.";
+                  })
+                }
               >
                 Disable Kite
               </button>
@@ -2981,26 +2991,90 @@ function Connections({
               <button
                 className="quiet-button"
                 disabled={kiteSaving}
-                onClick={async () => {
-                  setKiteSaving(true);
-                  try {
+                onClick={() =>
+                  kiteAction(async () => {
                     await api("/integrations/kite", "DELETE");
-                    setKite(await api("/integrations/kite"));
                     setKiteApiKey("");
                     setKiteApiSecret("");
                     setKiteRequestToken("");
                     setKiteAccessToken("");
-                  } catch (e) {
-                    setError((e as Error).message);
-                  } finally {
-                    setKiteSaving(false);
-                  }
-                }}
+                    return "Kite removed from this account.";
+                  })
+                }
               >
                 Clear Kite
               </button>
             )}
           </div>
+          {kite?.hasApiKey && (
+            <details className="field-help kite-steps">
+              <summary>Manual token (if your Kite app redirects elsewhere)</summary>
+              <p>
+                If the app&apos;s Redirect URL points to another site, click
+                Connect Kite, sign in, then copy the <code>request_token</code>{" "}
+                value from the address bar of the page Kite opens. A request
+                token works once and only for a few minutes. Exchanging it needs
+                the saved API secret; a pasted access token needs only the key.
+              </p>
+              <div className="form-grid">
+                <label>
+                  Request token
+                  <input
+                    type="password"
+                    value={kiteRequestToken}
+                    autoComplete="off"
+                    placeholder="Paste request_token"
+                    onChange={(e) => setKiteRequestToken(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Access token
+                  <input
+                    type="password"
+                    value={kiteAccessToken}
+                    autoComplete="off"
+                    placeholder="Or paste today's access_token"
+                    onChange={(e) => setKiteAccessToken(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="modal-actions">
+                <button
+                  className="quiet-button bordered"
+                  disabled={
+                    kiteSaving || !kite?.canConnect || !kiteRequestToken.trim()
+                  }
+                  onClick={() =>
+                    kiteAction(async () => {
+                      await api("/integrations/kite/request-token", "POST", {
+                        requestToken: kiteRequestToken,
+                      });
+                      setKiteRequestToken("");
+                      return "Kite connected for today.";
+                    })
+                  }
+                >
+                  Use request token
+                </button>
+                <button
+                  className="quiet-button bordered"
+                  disabled={kiteSaving || !kiteAccessToken.trim()}
+                  onClick={() =>
+                    kiteAction(async () => {
+                      await api("/integrations/kite", "PUT", {
+                        accessToken: kiteAccessToken,
+                        enabled: true,
+                      });
+                      setKiteAccessToken("");
+                      return "Kite access token saved for today.";
+                    })
+                  }
+                >
+                  Use access token
+                </button>
+              </div>
+            </details>
+          )}
         </section>
       )}
       {show ? (

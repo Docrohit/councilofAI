@@ -2951,3 +2951,101 @@ test("skills API is owner-scoped and the Skills Agent joins runs unless switched
       200,
     );
   }));
+test("unreadable keys are flagged, start failures release the session and Stop clears orphaned runs", async () =>
+  harness(async ({ api, db, engine, store }: any) => {
+    const owner = await api("/auth/signup", {
+      name: "Recovery",
+      email: "recovery@example.test",
+      password: "long-password-123",
+    });
+    const demo = (await api("/providers", undefined, owner.cookie)).data[0];
+    const saved = await api(
+      "/providers",
+      {
+        name: "Old key",
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        model: "example",
+        transport: "direct",
+        reasoning: false,
+        apiKey: "old-secret",
+      },
+      owner.cookie,
+    );
+    assert.equal(saved.status, 201);
+    // Simulate a key encrypted under a previous server encryption key.
+    db.prepare("UPDATE providers SET secret=? WHERE id=?").run(
+      "AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA==.AAAA",
+      saved.data.id,
+    );
+    const listed = (await api("/providers", undefined, owner.cookie)).data;
+    assert.equal(
+      listed.find((p: any) => p.id === saved.data.id).keyUnreadable,
+      true,
+    );
+    assert.equal(
+      listed.find((p: any) => p.id === demo.id).keyUnreadable,
+      undefined,
+    );
+    const refused = await api(
+      "/runs",
+      { prompt: "Use the old key", config: cfg([saved.data.id], 1) },
+      owner.cookie,
+    );
+    assert.equal(refused.status, 400);
+    assert.match(refused.data.error, /Old key can no longer be read/);
+    // Runs on other connections still work while one key is unreadable.
+    const fine = await api(
+      "/runs",
+      { prompt: "Demo still works", config: cfg([demo.id], 1) },
+      owner.cookie,
+    );
+    assert.equal(fine.status, 201);
+    await done(api, owner.cookie, fine.data.id);
+
+    const original = engine.start;
+    engine.start = async (userId: string, run: any) => {
+      engine.active.set(run.id, { userId, controller: new AbortController() });
+      throw new Error("Unsupported state or unable to authenticate data");
+    };
+    let failedId = "";
+    try {
+      const failing = await api(
+        "/runs",
+        { prompt: "Fails at start", config: cfg([demo.id], 1) },
+        owner.cookie,
+      );
+      assert.equal(failing.status, 201);
+      failedId = failing.data.id;
+      const result = await done(api, owner.cookie, failedId);
+      assert.equal(result.run.status, "failed");
+      assert.match(
+        result.events.find((e: any) => e.type === "run.status").data.message,
+        /saved connection key could not be read/,
+      );
+    } finally {
+      engine.start = original;
+    }
+    const next = await api(
+      "/runs",
+      { prompt: "Not blocked", config: cfg([demo.id], 1) },
+      owner.cookie,
+    );
+    assert.equal(next.status, 201, JSON.stringify(next.data));
+    await done(api, owner.cookie, next.data.id);
+
+    // A queued run that nothing is executing can be stopped.
+    const userId = (
+      db.prepare("SELECT id FROM users WHERE email=?").get(
+        "recovery@example.test",
+      ) as any
+    ).id;
+    const orphan = store.getRun(userId, failedId);
+    orphan.status = "queued";
+    store.saveRun(userId, orphan);
+    assert.equal(
+      (await api(`/runs/${failedId}/cancel`, {}, owner.cookie)).status,
+      200,
+    );
+    assert.equal(store.getRun(userId, failedId).status, "cancelled");
+  }));

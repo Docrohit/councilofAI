@@ -25,6 +25,8 @@ export interface Provider {
   reasoning: boolean;
   reasoningEffort?: ReasoningEffort;
   hasKey?: boolean;
+  /** The saved key exists but cannot be decrypted with the current server key. */
+  keyUnreadable?: boolean;
   apiKey?: string;
 }
 export interface Member {

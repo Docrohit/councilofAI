@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { complete, streamJson } from "../server/providers.ts";
 import { editImage, generateImage } from "../server/media.ts";
 import { validateEndpoint } from "../server/security.ts";
@@ -219,6 +220,22 @@ test("hosted connections use exact allowlisted origins and local URLs cannot emb
     () => validateEndpoint("http://user:secret@localhost:1234", false),
     /credentials/,
   );
+});
+
+test("every connection shortcut offered in the web app passes the hosted allowlist", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const urls = [...app.matchAll(/baseUrl: "(https:\/\/[^"]+)"/g)].map(
+    (m) => m[1],
+  );
+  assert(urls.includes("https://api.deepseek.com"));
+  const previous = process.env.ALLOWED_PROVIDER_ORIGINS;
+  delete process.env.ALLOWED_PROVIDER_ORIGINS;
+  try {
+    for (const url of urls)
+      assert.doesNotThrow(() => validateEndpoint(url, true), url);
+  } finally {
+    if (previous !== undefined) process.env.ALLOWED_PROVIDER_ORIGINS = previous;
+  }
 });
 
 test("OpenAI GPT image tools omit response_format and return generated attachments", async () => {

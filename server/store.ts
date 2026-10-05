@@ -15,12 +15,24 @@ export class Store {
       this.db
         .prepare("SELECT id,config,secret FROM providers WHERE user_id=?")
         .all(userId) as any[]
-    ).map((row) => ({
-      ...JSON.parse(row.config),
-      id: row.id,
-      hasKey: !!row.secret,
-      ...(secret ? { apiKey: this.secrets.decrypt(row.secret) } : {}),
-    }));
+    ).map((row) => {
+      // A key saved under an earlier encryption key cannot be decrypted; flag
+      // that connection instead of failing every caller.
+      let apiKey = "";
+      let keyUnreadable = false;
+      try {
+        apiKey = this.secrets.decrypt(row.secret);
+      } catch {
+        keyUnreadable = true;
+      }
+      return {
+        ...JSON.parse(row.config),
+        id: row.id,
+        hasKey: !!row.secret,
+        ...(keyUnreadable ? { keyUnreadable: true } : {}),
+        ...(secret ? { apiKey } : {}),
+      };
+    });
   }
   saveRun(userId: string, run: Run) {
     this.db

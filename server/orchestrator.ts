@@ -511,6 +511,31 @@ export class Orchestrator {
     public bridge = new Bridge(),
     public project?: ProjectRuntime,
   ) {}
+  /**
+   * Called when start() rejects before or outside its own error handling:
+   * releases the user's active slot and records why the run ended.
+   */
+  failStart(userId: string, runId: string, error: unknown) {
+    const active = this.active.get(runId);
+    if (active?.userId === userId) this.active.delete(runId);
+    // Runs from a detached .catch handler, so it must never throw itself.
+    try {
+      const run = this.store.getRun(userId, runId);
+      if (!run || !["queued", "running"].includes(run.status)) return;
+      const raw = error instanceof Error ? error.message : String(error);
+      const message = /unable to authenticate data|Unsupported state/i.test(raw)
+        ? "Council could not start this session: a saved connection key could not be read. Edit the connection in Connections and paste its key again."
+        : `Council could not start this session: ${raw.slice(0, 300)}`;
+      run.status = "failed";
+      this.store.saveRun(userId, run);
+      this.store.event(runId, "run.status", { status: "failed", message });
+    } catch (recordError) {
+      console.error(
+        "Could not record run start failure:",
+        recordError instanceof Error ? recordError.message : recordError,
+      );
+    }
+  }
   cancel(userId: string, id: string) {
     const active = this.active.get(id);
     if (active?.userId === userId) {

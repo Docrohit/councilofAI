@@ -340,7 +340,10 @@ export class Benchmarks {
           this.save(userId, result);
           this.store.saveRun(userId, run);
           let started = Date.now();
-          await this.engine.start(userId, run);
+          await this.engine.start(userId, run).catch((error) => {
+            this.engine.failStart(userId, run.id, error);
+            throw error;
+          });
           const councilMs = Date.now() - started;
           const events = this.store.events(run.id);
           const turns = events.filter((e) => e.type === "turn.start").length;

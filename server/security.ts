@@ -74,7 +74,7 @@ export function validateEndpoint(
     );
   const allowed = (
     process.env.ALLOWED_PROVIDER_ORIGINS ||
-    "https://api.openai.com,https://api.anthropic.com,https://api.z.ai"
+    "https://api.openai.com,https://api.anthropic.com,https://api.z.ai,https://api.deepseek.com"
   )
     .split(",")
     .map((s) => s.trim());

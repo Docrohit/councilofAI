@@ -239,6 +239,14 @@ export function createApp(directory: string, production = false) {
     legacyHeaders: false,
   });
   const userOf = (res: Response) => res.locals.user as User;
+  const unreadableKeys = (providers: Provider[], ids: string[]) => {
+    const names = providers
+      .filter((p) => ids.includes(p.id) && p.keyUnreadable)
+      .map((p) => p.name);
+    return names.length
+      ? `The saved API key for ${names.join(", ")} can no longer be read. Edit ${names.length > 1 ? "those connections" : "that connection"} in Connections and paste the key again.`
+      : "";
+  };
   const appOrigin = process.env.APP_ORIGIN || "http://localhost:4310";
   const chargeMessage = (userId: string) => {
     assertCanSend(db, userId);
@@ -276,6 +284,8 @@ export function createApp(directory: string, production = false) {
       throw new Error(
         "Invalid saved team or budget. Update your Council team.",
       );
+    const keyProblem = unreadableKeys(providers, config.providerIds);
+    if (keyProblem) throw new Error(keyProblem);
     const selected = providers.filter((p) => config.providerIds.includes(p.id));
     if (
       selected.some((p) => p.kind === "demo") &&
@@ -355,9 +365,13 @@ export function createApp(directory: string, production = false) {
         id,
         userId,
       );
-    void engine
-      .start(userId, run)
-      .catch((error) => console.error("Run failure:", error.message));
+    void engine.start(userId, run).catch((error) => {
+      console.error(
+        "Run failure:",
+        error instanceof Error ? error.message : String(error),
+      );
+      engine.failStart(userId, run.id, error);
+    });
     return run;
   };
   const telegram = new TelegramBridge(
@@ -1031,6 +1045,12 @@ export function createApp(directory: string, production = false) {
       res.sendStatus(404);
       return;
     }
+    if (provider.keyUnreadable) {
+      res
+        .status(400)
+        .json({ error: unreadableKeys([provider], [provider.id]) });
+      return;
+    }
     const request = {
       messages: [
         { role: "user" as const, content: "Reply with just: Connected" },
@@ -1089,6 +1109,11 @@ export function createApp(directory: string, production = false) {
     }
     const providers = store.providers(userId);
     const selected = [...data.config.providerIds, data.baselineProviderId];
+    const benchmarkKeyProblem = unreadableKeys(providers, selected);
+    if (benchmarkKeyProblem) {
+      res.status(400).json({ error: benchmarkKeyProblem });
+      return;
+    }
     const tasks = [
       ...data.taskIds.map((id) => benchmarkSuite.find((t) => t.id === id)),
       ...data.customTasks,
@@ -1230,6 +1255,11 @@ export function createApp(directory: string, production = false) {
       });
       return;
     }
+    const keyProblem = unreadableKeys(providers, config.providerIds);
+    if (keyProblem) {
+      res.status(400).json({ error: keyProblem });
+      return;
+    }
     const selected = providers.filter((p) => config.providerIds.includes(p.id));
     if (
       selected.some((p) => p.kind === "demo") &&
@@ -1324,9 +1354,13 @@ export function createApp(directory: string, production = false) {
         id,
         userId,
       );
-    void engine
-      .start(userId, run)
-      .catch((error) => console.error("Run failure:", error.message));
+    void engine.start(userId, run).catch((error) => {
+      console.error(
+        "Run failure:",
+        error instanceof Error ? error.message : String(error),
+      );
+      engine.failStart(userId, run.id, error);
+    });
     res.status(201).json(run);
   });
   app.post("/api/runs/:id/continue", (req, res) => {
@@ -1363,6 +1397,14 @@ export function createApp(directory: string, production = false) {
       });
       return;
     }
+    const continueKeyProblem = unreadableKeys(
+      available,
+      previous.config.providerIds,
+    );
+    if (continueKeyProblem) {
+      res.status(400).json({ error: continueKeyProblem });
+      return;
+    }
     const run: Run = {
       ...previous,
       id: randomUUID(),
@@ -1375,9 +1417,13 @@ export function createApp(directory: string, production = false) {
       sharedState: undefined,
     };
     store.saveRun(userId, run);
-    void engine
-      .start(userId, run)
-      .catch((error) => console.error("Run failure:", error.message));
+    void engine.start(userId, run).catch((error) => {
+      console.error(
+        "Run failure:",
+        error instanceof Error ? error.message : String(error),
+      );
+      engine.failStart(userId, run.id, error);
+    });
     res.status(201).json(run);
   });
   app.get("/api/runs/:id", (req, res) => {
@@ -1394,7 +1440,18 @@ export function createApp(directory: string, production = false) {
       res.sendStatus(404);
       return;
     }
-    engine.cancel(userOf(res).id, run.id);
+    if (
+      !engine.cancel(userOf(res).id, run.id) &&
+      ["queued", "running"].includes(run.status)
+    ) {
+      // Nothing is executing this run any more; release it so new work can start.
+      run.status = "cancelled";
+      store.saveRun(userOf(res).id, run);
+      store.event(run.id, "run.status", {
+        status: "cancelled",
+        message: "Stopped. This session was no longer running on the server.",
+      });
+    }
     res.json({ ok: true });
   });
   app.post("/api/runs/:id/board", (req, res) => {

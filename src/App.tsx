@@ -2678,6 +2678,9 @@ function Connections({
             </span>
             <div>
               <b>{p.name}</b>
+              {p.keyUnreadable && (
+                <span className="tiny-tag key-warning">Key needs re-entry</span>
+              )}
               <span>
                 {p.model}
                 {p.reasoningEffort

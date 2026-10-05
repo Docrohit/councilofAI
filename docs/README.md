@@ -43,6 +43,8 @@ that their infrastructure is implemented or live.
 
 ## Recent handoffs and release notes
 
+- [2026-10-05 run recovery and DeepSeek fix](handoffs/2026-10-05-run-recovery-deepseek-fix.md):
+  unreadable connection keys, stuck sessions and the DeepSeek allowlist.
 - [2026-10-05 Skills release](handoffs/2026-10-05-skills-agent-release.md):
   account Skills, built-in options skills, the Skills Agent and the
   `option_strategy` calculator.

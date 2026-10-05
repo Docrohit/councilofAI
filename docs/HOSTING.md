@@ -20,7 +20,7 @@ COOKIE_SECURE=true
 TRUST_PROXY=1
 ALLOW_SIGNUP=true
 INVITE_CODE=<private-beta invitation code>
-ALLOWED_PROVIDER_ORIGINS=https://api.openai.com,https://api.anthropic.com,https://api.z.ai
+ALLOWED_PROVIDER_ORIGINS=https://api.openai.com,https://api.anthropic.com,https://api.z.ai,https://api.deepseek.com
 DATA_DIR=/data
 ```
 

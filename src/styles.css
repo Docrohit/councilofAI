@@ -3353,3 +3353,8 @@ fieldset {
   font-size: 12px;
   line-height: 1.6;
 }
+.key-warning {
+  margin-left: 8px;
+  color: #e7b46a;
+  border-color: #6b5530;
+}

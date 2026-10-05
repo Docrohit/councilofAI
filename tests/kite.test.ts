@@ -78,6 +78,14 @@ test("kite stores api secret encrypted and refreshes access token from request t
     const status = kiteStatus(db, store, userId, "https://council.example");
     assert.equal(status.callbackUrl, "https://council.example/api/integrations/kite/callback");
     assert.match(status.loginUrl || "", /kite\.zerodha\.com/);
+    const changed = saveKite(db, store, userId, {
+      enabled: false,
+      apiKey: "new-kite-key",
+      apiSecret: "new-kite-secret",
+    });
+    assert.equal(changed.hasApiKey, true);
+    assert.equal(changed.hasApiSecret, true);
+    assert.equal(changed.hasAccessToken, false);
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

@@ -58,8 +58,13 @@ export function saveKite(
     ? JSON.parse(existing.config)
     : { enabled: false };
   const secrets = existing ? readSecrets(store, existing) : {};
+  const credentialChanged = !!(input.apiKey?.trim() || input.apiSecret?.trim());
   if (input.apiKey?.trim()) config.apiKey = input.apiKey.trim();
   if (input.apiSecret?.trim()) secrets.apiSecret = input.apiSecret.trim();
+  if (credentialChanged) {
+    delete secrets.accessToken;
+    delete secrets.accessTokenUpdatedAt;
+  }
   if (input.accessToken?.trim()) {
     secrets.accessToken = input.accessToken.trim();
     secrets.accessTokenUpdatedAt = new Date().toISOString();

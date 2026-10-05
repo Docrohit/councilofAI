@@ -2811,9 +2811,10 @@ function Connections({
           </div>
           <p className="field-help">
             Adds read-only Kite tools for quotes, historical candles and option
-            chain data. Council never places, modifies or cancels orders. Save
-            your Kite app credentials once, then refresh the request token after
-            your morning Kite login.
+            chain data. Council never places, modifies or cancels orders. Paste
+            the current Kite Connect app key and secret from Zerodha Developer
+            Console, then refresh the request token after your morning Kite
+            login.
           </p>
           {kite?.accessTokenUpdatedAt && (
             <p className="field-help">
@@ -2881,6 +2882,12 @@ function Connections({
           {kite?.callbackUrl && (
             <p className="field-help">
               Kite app redirect URL for direct callback: {kite.callbackUrl}
+            </p>
+          )}
+          {kite?.hasApiKey && kite?.hasApiSecret && !kite?.hasAccessToken && (
+            <p className="field-help">
+              If Kite opens with “Invalid api_key”, clear Kite and paste the
+              current app key and secret from developers.kite.trade.
             </p>
           )}
           <div className="modal-actions">

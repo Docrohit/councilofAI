@@ -352,10 +352,11 @@ test("billing admin can review screenshot and approve paid users", async () =>
       admin.cookie,
     );
     assert.equal(review.status, 200);
+    // An approved screenshot buys one billing period (3 months).
     const approved = db
-      .prepare("SELECT access_approved FROM users WHERE id=?")
+      .prepare("SELECT access_until FROM users WHERE id=?")
       .get(userId) as any;
-    assert.equal(approved.access_approved, 1);
+    assert(new Date(approved.access_until).getTime() > Date.now() + 80 * 86_400_000);
   }));
 test("streaming delegation starts a specialist before parent response finishes", async () => {
   const model = createServer(async (req, res) => {

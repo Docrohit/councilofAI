@@ -49,6 +49,14 @@ test("signup, responsive workspace, one model with five peers, resolved finding 
   await dialog
     .getByRole("button", { name: "Manage connections", exact: true })
     .click();
+  // Type part of a model name, pick it: provider, endpoint and exact ID are filled in.
+  await dialog.getByRole("button", { name: "Add connection" }).click();
+  await dialog.getByRole("combobox", { name: "Find a model" }).fill("glm");
+  await dialog.getByRole("listbox").getByRole("option", { name: /GLM 5\.3/ }).first().click();
+  const form = dialog.locator("form.connection-form");
+  await expect(form.getByLabel("Model ID", { exact: true })).toHaveValue("glm-5.3");
+  await expect(form.getByLabel("Base URL", { exact: true })).toHaveValue("https://api.z.ai/api/paas/v4");
+  await form.getByRole("button", { name: "Cancel", exact: true }).click();
   await dialog
     .getByRole("button", { name: "Configure team", exact: true })
     .click();

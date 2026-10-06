@@ -60,6 +60,8 @@ import type {
   User,
 } from "../shared/types";
 import { api } from "./api";
+import { ModelPicker, useCatalog } from "./ModelPicker";
+import type { CatalogEntry } from "../shared/modelCatalog";
 import type { Finding, Work } from "../server/knowledge";
 import type { Assessment } from "../server/adaptation";
 
@@ -91,6 +93,7 @@ const clean = (text: string) =>
 interface BillingStatus {
   emailVerified: boolean;
   accessApproved: boolean;
+  accessUntil?: string | null;
   freeLimit: number;
   freeUsed: number;
   freeRemaining: number | null;
@@ -118,6 +121,7 @@ interface AdminPaymentSubmission extends PaymentSubmission {
   email: string;
   name: string;
   accessApproved: number;
+  accessUntil?: string | null;
   freeUsed: number;
 }
 function Mark({ small = false }: { small?: boolean }) {
@@ -1080,10 +1084,17 @@ function BillingPanel({
             <span className="field-help">Email</span>
             <b>{status?.emailVerified ? "Confirmed" : "Pending"}</b>
           </div>
+          {status?.accessUntil && (
+            <div>
+              <span className="field-help">Paid access until</span>
+              <b>{new Date(status.accessUntil).toLocaleDateString()}</b>
+            </div>
+          )}
         </div>
       </div>
+      <AutoPay status={status} onPaid={refreshAll} />
       <div className="settings-section">
-        <h3>Lightning payment</h3>
+        <h3>Manual payment (screenshot)</h3>
         <p className="muted">
           Pay {status?.paymentSatoshis?.toLocaleString("en-US") || "100,000"}{" "}
           satoshis for quarterly access
@@ -1161,6 +1172,285 @@ function BillingPanel({
   );
 }
 
+interface PaymentOrder {
+  id: string;
+  chain: "lightning" | "onchain";
+  amountSats: number;
+  months: number;
+  status: "pending" | "review" | "paid" | "expired" | "rejected";
+  invoice: string | null;
+  autoVerify: boolean;
+  exactAmount: boolean;
+  address: string | null;
+  confirmations: number;
+  txReference: string | null;
+  proofCheck: any;
+  proofNote: string | null;
+  adminNote: string | null;
+  expiresAt: string;
+  createdAt: string;
+  email?: string;
+  name?: string;
+}
+
+/** Pay by Lightning or on-chain; payments are verified automatically. */
+function AutoPay({ status, onPaid }: { status: BillingStatus | null; onPaid: () => Promise<void> }) {
+  const [methods, setMethods] = useState<{ lightning: boolean; onchain: boolean } | null>(null);
+  const [orders, setOrders] = useState<PaymentOrder[]>([]);
+  const [order, setOrder] = useState<PaymentOrder | null>(null);
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const load = async () => {
+    const [billing, rows] = await Promise.all([api<any>("/billing"), api<PaymentOrder[]>("/billing/orders")]);
+    setMethods(billing.payments);
+    setOrders(rows);
+  };
+  useEffect(() => {
+    load().catch((e) => setError((e as Error).message));
+  }, []);
+  useEffect(() => {
+    // Lightning payments are still recognised for an hour after the invoice expires.
+    const graceOver = order?.status === "expired" && Date.now() - new Date(order.expiresAt).getTime() > 3_600_000;
+    if (!order || !["pending", "review", "expired"].includes(order.status) || graceOver) return;
+    const timer = setInterval(async () => {
+      const fresh = await api<PaymentOrder>(`/billing/orders/${order.id}`).catch(() => null);
+      if (!fresh) return;
+      setOrder(fresh);
+      if (fresh.status === "paid") {
+        setMessage("Payment received. Thank you!");
+        await onPaid();
+        await load();
+      }
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [order?.id, order?.status]);
+  async function start(chain: "lightning" | "onchain") {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      setOrder(await api<PaymentOrder>("/billing/orders", "POST", { chain }));
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function prove() {
+    if (!order) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const updated = await api<PaymentOrder>(`/billing/orders/${order.id}/proof`, "POST", {
+        reference: reference || undefined,
+        note: note || undefined,
+      });
+      setOrder(updated);
+      setReference("");
+      setNote("");
+      if (updated.status === "paid") {
+        setMessage("Payment verified. Thank you!");
+        await onPaid();
+      } else setMessage(updated.status === "review" ? "Sent for review." : "Transaction found. It unlocks after confirmation.");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const copy = (text: string) => navigator.clipboard.writeText(text).then(() => setMessage("Copied."));
+  if (!methods || (!methods.lightning && !methods.onchain)) return null;
+  const sats = status?.paymentSatoshis?.toLocaleString("en-US") || "100,000";
+  return (
+    <div className="settings-section">
+      <h3>Pay with bitcoin</h3>
+      <p className="muted">
+        {sats} sats buys {status?.billingPeriodMonths ?? 3} months of access. Payments are checked automatically; paying again
+        extends your access.
+      </p>
+      <div className="modal-actions">
+        {methods.lightning && (
+          <button className="primary" disabled={busy} onClick={() => start("lightning")}>
+            Pay with Lightning
+          </button>
+        )}
+        {methods.onchain && (
+          <button className="quiet-button" disabled={busy} onClick={() => start("onchain")}>
+            Pay on-chain
+          </button>
+        )}
+      </div>
+      {order && (
+        <div className="pay-order">
+          <p>
+            <b>
+              Pay {order.amountSats.toLocaleString("en-US")} sats {order.chain === "lightning" ? "by Lightning" : "on-chain"}
+            </b>{" "}
+            <span className={`tiny-tag payment-${order.status}`}>{order.status}</span>
+          </p>
+          {order.status !== "paid" && (
+            <>
+              {(order.invoice || order.address) && (
+                <img className="pay-qr" src={`/api/billing/orders/${order.id}/qr.svg`} alt="Payment QR code" />
+              )}
+              {order.invoice && (
+                <p>
+                  <a href={`lightning:${order.invoice}`}>Open in wallet</a> ·{" "}
+                  <button className="link-button" onClick={() => copy(order.invoice!)}>
+                    Copy invoice
+                  </button>
+                </p>
+              )}
+              {order.address && (
+                <p>
+                  <code>{order.address}</code>{" "}
+                  <button className="link-button" onClick={() => copy(order.address!)}>
+                    Copy address
+                  </button>
+                  <br />
+                  <b>Send exactly {order.amountSats.toLocaleString("en-US")} sats.</b> The exact amount identifies your payment; a
+                  different amount needs manual review.
+                </p>
+              )}
+              <p className="field-help">
+                {order.autoVerify
+                  ? order.chain === "onchain"
+                    ? `Unlocks automatically after confirmation (currently ${order.confirmations}).`
+                    : "Unlocks automatically within a few minutes of payment."
+                  : "Your wallet may show a payment preimage (proof of payment); paste it below to unlock instantly."}
+              </p>
+              <label>
+                {order.chain === "lightning" ? "Payment preimage (optional)" : "Transaction id or mempool.space link (optional)"}
+                <input value={reference} onChange={(e) => setReference(e.target.value)} />
+              </label>
+              <label>
+                Note for review (optional)
+                <input value={note} onChange={(e) => setNote(e.target.value)} />
+              </label>
+              <div className="modal-actions">
+                <button className="quiet-button" disabled={busy || (!reference && !note)} onClick={prove}>
+                  Send proof
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {orders.length > 0 && (
+        <div className="payment-list">
+          {orders.map((o) => (
+            <div className="payment-row" key={o.id}>
+              <div>
+                <b>
+                  {o.amountSats.toLocaleString("en-US")} sats · {o.chain}
+                </b>
+                <span className="field-help">{new Date(o.createdAt).toLocaleString()}</span>
+              </div>
+              <span>
+                <span className={`tiny-tag payment-${o.status}`}>{o.status}</span>{" "}
+                {["pending", "review", "expired"].includes(o.status) && (
+                  <button className="link-button" onClick={() => setOrder(o)}>
+                    open
+                  </button>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {error && <div className="error">{error}</div>}
+      {message && <div className="success-note">{message}</div>}
+    </div>
+  );
+}
+
+/** Admin review of bitcoin payments that could not be verified automatically. */
+function AdminPaymentOrders() {
+  const [orders, setOrders] = useState<PaymentOrder[]>([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  const refresh = async () => setOrders(await api<PaymentOrder[]>("/billing/admin/orders"));
+  useEffect(() => {
+    refresh().catch((e) => setError((e as Error).message));
+  }, []);
+  async function act(o: PaymentOrder, action: "approve" | "reject", force = false, note?: string) {
+    setBusy(o.id);
+    setError("");
+    try {
+      await api(`/billing/admin/orders/${o.id}`, "POST", { action, force, note });
+      await refresh();
+    } catch (e) {
+      const message = (e as Error).message;
+      // Only checks that failed can be overridden; network errors and settled payments cannot.
+      if (action === "approve" && !force && /Approve anyway/.test(message) && window.confirm(`${message}\n\nApprove anyway? This is logged.`)) {
+        const reason = window.prompt("Why are you approving it?");
+        setBusy("");
+        if (reason === null) return;
+        return act(o, "approve", true, reason || undefined);
+      }
+      setError(message);
+    } finally {
+      setBusy("");
+    }
+  }
+  return (
+    <div className="settings-section">
+      <h3>Bitcoin payments</h3>
+      <p className="muted">Most payments unlock automatically. Review the ones that could not be verified.</p>
+      {error && <div className="error">{error}</div>}
+      {orders.length ? (
+        <div className="payment-list">
+          {orders.map((o) => (
+            <div className="payment-row" key={o.id}>
+              <div>
+                <b>{o.email}</b>
+                <span className="field-help">
+                  {o.amountSats.toLocaleString("en-US")} sats · {o.chain} · {new Date(o.createdAt).toLocaleString()}
+                  {o.txReference ? ` · ${o.txReference}` : ""}
+                </span>
+                {o.proofCheck ? (
+                  <span className="field-help">
+                    Server check: pays {Number(o.proofCheck.paysSats).toLocaleString("en-US")} of{" "}
+                    {Number(o.proofCheck.orderSats).toLocaleString("en-US")} sats · {o.proofCheck.exact ? "exact amount" : "not exact"} ·{" "}
+                    {o.proofCheck.confirmed ? "confirmed" : "unconfirmed"}
+                    {o.proofCheck.beforeOrder ? " · paid before the order" : ""}
+                    {o.proofCheck.claimedBy?.length ? " · part already used" : ""}
+                  </span>
+                ) : (
+                  o.chain === "onchain" && <span className="field-help">No verified transaction.</span>
+                )}
+                {o.proofNote && <span className="field-help">Buyer's note: {o.proofNote}</span>}
+                {o.adminNote && <span className="field-help">Admin note: {o.adminNote}</span>}
+              </div>
+              <span className="modal-actions">
+                <span className={`tiny-tag payment-${o.status}`}>{o.status}</span>
+                {["pending", "review", "expired"].includes(o.status) && (
+                  <>
+                    <button className="quiet-button" disabled={busy === o.id} onClick={() => act(o, "reject")}>
+                      Reject
+                    </button>
+                    <button className="primary" disabled={busy === o.id} onClick={() => act(o, "approve")}>
+                      Approve
+                    </button>
+                  </>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No bitcoin payments yet.</p>
+      )}
+    </div>
+  );
+}
+
 function ApprovePaidUsers() {
   const [payments, setPayments] = useState<AdminPaymentSubmission[]>([]);
   const [busy, setBusy] = useState("");
@@ -1189,11 +1479,12 @@ function ApprovePaidUsers() {
   }
   return (
     <div className="settings-panel billing-panel">
+      <AdminPaymentOrders />
       <div className="settings-section">
         <h3>Approve paid users</h3>
         <p className="muted">
-          Review Lightning payment screenshots. Approving a submission unlocks
-          that user account.
+          Review payment screenshots. Approving a submission gives that account
+          one billing period of access.
         </p>
         <div className="modal-actions">
           <button className="quiet-button" onClick={refresh}>
@@ -1210,7 +1501,11 @@ function ApprovePaidUsers() {
                     <b>{payment.email}</b>
                     <span className="field-help">
                       {payment.name} · free messages {payment.freeUsed} ·{" "}
-                      {payment.accessApproved ? "approved" : "not approved"}
+                      {payment.accessApproved
+                        ? "approved"
+                        : payment.accessUntil && new Date(payment.accessUntil).getTime() > Date.now()
+                          ? `paid until ${new Date(payment.accessUntil).toLocaleDateString()}`
+                          : "not approved"}
                     </span>
                     <span className="field-help">
                       {payment.fileName} ·{" "}
@@ -2586,7 +2881,23 @@ function Connections({
   const [kiteSaving, setKiteSaving] = useState(false);
   const [kiteError, setKiteError] = useState("");
   const [kiteNotice, setKiteNotice] = useState("");
-  const shortcut = modelShortcuts.find((item) => item.id === shortcutId);
+  const catalog = useCatalog("/api/model-catalog", undefined, { "X-Council-Request": "1" });
+  const [picked, setPicked] = useState<CatalogEntry | null>(null);
+  // A model picked by typing fills the provider, endpoint, exact ID and reasoning defaults.
+  const shortcut: ModelShortcut | undefined = picked
+    ? {
+        id: picked.key,
+        label: picked.name,
+        name: picked.name,
+        kind: picked.kind as ProviderKind,
+        baseUrl: picked.baseUrl,
+        model: picked.id,
+        defaultReasoning: !!picked.defaultEffort,
+        defaultEffort: picked.defaultEffort as ReasoningEffort | undefined,
+        efforts: picked.efforts as ReasoningEffort[] | undefined,
+        note: picked.note,
+      }
+    : modelShortcuts.find((item) => item.id === shortcutId);
   async function kiteAction(work: () => Promise<string>) {
     setKiteSaving(true);
     setKiteError("");
@@ -2619,7 +2930,7 @@ function Connections({
         ? data.reasoningEffort
         : undefined;
     try {
-      await api(
+      const saved = await api(
         edit ? `/providers/${edit.id}` : "/providers",
         edit ? "PUT" : "POST",
         {
@@ -2633,7 +2944,11 @@ function Connections({
       await refresh();
       setShow(false);
       setEdit(null);
-      setStatus("Connection saved. Test it, then assign it to your team.");
+      setStatus(
+        saved?.correctedModel
+          ? `Connection saved with the provider's exact model ID ${saved.correctedModel}. Test it, then assign it to your team.`
+          : "Connection saved. Test it, then assign it to your team.",
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -3097,16 +3412,46 @@ function Connections({
           key={edit?.id || "new"}
           onSubmit={submit}
         >
+          {!edit && (
+            <div className="full model-picker-row">
+              <ModelPicker
+                entries={catalog}
+                value={picked}
+                label="Find a model"
+                onSelect={(entry) => {
+                  setPicked(entry);
+                  setShortcutId(entry ? entry.key : "");
+                  if (entry) {
+                    setKind(entry.kind as ProviderKind);
+                    setTransport("direct");
+                  }
+                }}
+              />
+              <p className="field-help">
+                Type a name like gpt, claude, glm or deepseek and pick one; then just paste your key.
+                {picked && (
+                  <>
+                    {" "}
+                    <a href={picked.keyUrl} target="_blank" rel="noreferrer">
+                      Get a {picked.providerName} key
+                    </a>
+                    .
+                  </>
+                )}
+              </p>
+            </div>
+          )}
           <div className="form-grid">
             <label>
               Known model
               <select
-                value={shortcutId}
+                value={picked ? "" : shortcutId}
                 disabled={!!edit}
                 onChange={(e) => {
                   const next = modelShortcuts.find(
                     (item) => item.id === e.target.value,
                   );
+                  setPicked(null);
                   setShortcutId(e.target.value);
                   if (next) {
                     setKind(next.kind);
@@ -3129,6 +3474,7 @@ function Connections({
                 onChange={(e) => {
                   setKind(e.target.value as ProviderKind);
                   setShortcutId("");
+                  setPicked(null);
                   setTransport(
                     e.target.value === "opencode" ? "bridge" : "direct",
                   );
@@ -3300,6 +3646,7 @@ function Connections({
               setKind("ollama");
               setTransport("direct");
               setShortcutId("");
+              setPicked(null);
               setShow(true);
               setError("");
             }}

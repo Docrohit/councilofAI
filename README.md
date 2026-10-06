@@ -88,7 +88,8 @@ SMTP_FROM=cosmicwisdomyt@gmail.com
 BUSINESS_EMAIL=cosmicwisdomyt@gmail.com
 ADMIN_TOKEN=a-long-random-admin-token
 BILLING_ADMIN_EMAILS=cosmicwisdomyt@gmail.com,rohitsharma9000@gmail.com
-LIGHTNING_WALLET=your-lightning-invoice-or-address
+LIGHTNING_ADDRESS=you@walletofsatoshi.com
+ONCHAIN_ADDRESS=bc1q...
 FREE_MESSAGE_LIMIT=10
 PAYMENT_SATOSHIS=100000
 BILLING_PERIOD_MONTHS=3
@@ -108,7 +109,49 @@ the default approvers `cosmicwisdomyt@gmail.com` and
 `rohitsharma9000@gmail.com` can use Council without message caps.
 
 The default paid plan is `PAYMENT_SATOSHIS=100000` for quarterly access
-(`BILLING_PERIOD_MONTHS=3`). The app converts that satoshi amount to BTC and
+(`BILLING_PERIOD_MONTHS=3`). Each verified payment adds one billing period to
+`users.access_until`, starting from today or from the end of current access.
+Accounts approved by an admin toggle (`access_approved`) stay approved without
+a date.
+
+### Automatic bitcoin payments
+
+With `LIGHTNING_ADDRESS` (a Lightning address such as Wallet of Satoshi) and/or
+`ONCHAIN_ADDRESS` (a mainnet `bc1q…`/`bc1p…` address), the Billing screen offers
+**Pay with Lightning** and **Pay on-chain**, and the server checks payments
+every minute (`server/payments.ts`):
+
+- **Lightning:** each invoice carries a NIP-57 zap request; the provider's
+  signed zap receipt (read from `NOSTR_RELAYS`) unlocks access. Buyers can also
+  paste the payment preimage. LUD-21 `verify` links are used when offered.
+- **On-chain:** each order gets a unique amount (price + 2,001–3,999 sats by
+  default, `ONCHAIN_OFFSET_MIN`/`ONCHAIN_OFFSET_MAX`, at most 1,999 wide; amounts in
+  `ONCHAIN_RESERVED_BANDS`, Council Network's bands, are never used), matched on mempool.space
+  (`MEMPOOL_API`) after `ONCHAIN_CONFIRMATIONS`. Council Network uses
+  1–1,999 on the same address, so one payment can never match orders in both
+  apps. A pasted txid or mempool link is checked the same way.
+- Every payment is recorded in `payment_claims` and unlocks one order. Anything
+  that cannot be verified goes to **Approve paid users** with the server's own
+  check; admin approval re-checks the transaction (confirmed, after the order,
+  exactly the order's amount, since the address is shared with Council
+  Network). "Approve anyway" is logged and still records the payment so it
+  cannot unlock another order. Orders older than the 14-day matching window
+  cannot claim a pasted transaction, and a screenshot can be approved once.
+- Screenshots remain a manual fallback; approving one also adds one billing
+  period. `LIGHTNING_WALLET` is still read when `LIGHTNING_ADDRESS` is unset.
+
+New dependencies: `@noble/curves`, `@noble/hashes` and `@scure/base` (audited,
+dependency-free) for Nostr signatures, BOLT11 decoding and address checks, and
+`qrcode` for payment QR codes.
+
+### Model picker
+
+The connection form has a **Find a model** box: typing part of a name (gpt,
+claude, glm, deepseek, gemini…) lists matching models from `shared/modelCatalog.ts`
+(curated IDs plus OpenRouter's public list, refreshed daily) and fills the
+provider, endpoint and exact model ID. When a key is saved, the server asks the
+provider for its model list and stores the closest real ID. In hosted mode the
+list only shows providers allowed by `ALLOWED_PROVIDER_ORIGINS`. The app converts that satoshi amount to BTC and
 shows a live USD estimate from Coinbase BTC-USD spot pricing when available.
 Set `BTC_USD_PRICE` only if you need a fixed/manual display value. Usage limits
 should be set from the highest expected token price at the maximum token budget,

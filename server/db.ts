@@ -42,6 +42,20 @@ export function openDb(directory: string) {
     );
   if (!columns.includes("confirmed_at"))
     db.exec("ALTER TABLE users ADD COLUMN confirmed_at TEXT");
+  // Paid access runs until this time; each verified payment extends it by the billing period.
+  if (!columns.includes("access_until"))
+    db.exec("ALTER TABLE users ADD COLUMN access_until TEXT");
+  db.exec(`CREATE TABLE IF NOT EXISTS payment_orders(
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      chain TEXT NOT NULL CHECK (chain IN ('lightning','onchain')), amount_sats INTEGER NOT NULL, months INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending','review','paid','expired','rejected')),
+      invoice TEXT, payment_hash TEXT, verify_url TEXT, zap_request_id TEXT, zap_recipient TEXT, zap_provider_pubkey TEXT,
+      address TEXT, tx_reference TEXT, proof_check TEXT, proof_note TEXT, confirmations INTEGER NOT NULL DEFAULT 0,
+      admin_note TEXT, expires_at TEXT NOT NULL, paid_at TEXT, created_at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS payment_order_owner ON payment_orders(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS payment_order_open ON payment_orders(status, chain);
+    -- Each payment (an on-chain output or a Lightning payment hash) unlocks at most one order; claims outlive orders.
+    CREATE TABLE IF NOT EXISTS payment_claims(reference TEXT PRIMARY KEY, order_id TEXT NOT NULL, created_at TEXT NOT NULL);`);
   const paymentColumns = (
     db.prepare("PRAGMA table_info(payment_submissions)").all() as {
       name: string;

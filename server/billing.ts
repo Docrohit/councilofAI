@@ -3,12 +3,15 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { DB } from "./db.ts";
 import { tokenHash } from "./security.ts";
 import type { User } from "../shared/types.ts";
+import { extendAccess } from "./payments.ts";
 
 export const PAYMENT_SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024;
 
 export interface AccountStatus {
   emailVerified: boolean;
   accessApproved: boolean;
+  /** End of paid access (null for free, admin-approved without a date, or expired). */
+  accessUntil: string | null;
   freeLimit: number;
   freeUsed: number;
   freeRemaining: number | null;
@@ -132,22 +135,25 @@ export function isBillingAdmin(email: string) {
 export function accountStatus(db: DB, userId: string): AccountStatus {
   const row = db
     .prepare(
-      "SELECT email,email_verified,access_approved,free_messages_used FROM users WHERE id=?",
+      "SELECT email,email_verified,access_approved,access_until,free_messages_used FROM users WHERE id=?",
     )
     .get(userId) as
     | {
         email: string;
         email_verified: number;
         access_approved: number;
+        access_until: string | null;
         free_messages_used: number;
       }
     | undefined;
   const limit = freeLimit();
   const used = Math.max(0, Number(row?.free_messages_used || 0));
-  const approved = !!row?.access_approved || !!(row && isBillingAdmin(row.email));
+  const paidUntil = row?.access_until && new Date(row.access_until).getTime() > Date.now() ? row.access_until : null;
+  const approved = !!row?.access_approved || !!paidUntil || !!(row && isBillingAdmin(row.email));
   return {
     emailVerified: !!row?.email_verified,
     accessApproved: approved,
+    accessUntil: paidUntil,
     freeLimit: limit,
     freeUsed: used,
     freeRemaining: approved ? null : Math.max(0, limit - used),
@@ -198,7 +204,7 @@ export function listPaymentSubmissions(db: DB) {
   return db
     .prepare(
       `SELECT p.id,p.user_id AS userId,p.file_name AS fileName,p.mime,p.status,p.created_at AS createdAt,p.note,
-              u.email,u.name,u.access_approved AS accessApproved,u.free_messages_used AS freeUsed
+              u.email,u.name,u.access_approved AS accessApproved,u.access_until AS accessUntil,u.free_messages_used AS freeUsed
        FROM payment_submissions p
        JOIN users u ON u.id=p.user_id
        ORDER BY p.created_at DESC
@@ -223,14 +229,20 @@ export function reviewPaymentSubmission(
     .prepare("SELECT user_id FROM payment_submissions WHERE id=?")
     .get(id) as { user_id: string } | undefined;
   if (!row) return false;
-  db.prepare("UPDATE payment_submissions SET status=?,note=? WHERE id=?").run(
-    status,
-    note,
-    id,
-  );
-  if (status === "approved")
-    db.prepare("UPDATE users SET access_approved=1 WHERE id=?").run(row.user_id);
-  return true;
+  // Only a submitted screenshot can be decided, once: approving twice never adds two periods.
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const changed = db
+      .prepare("UPDATE payment_submissions SET status=?,note=? WHERE id=? AND status='submitted'")
+      .run(status, note, id);
+    // An approved payment screenshot buys one billing period, like an automatic payment.
+    if (changed.changes && status === "approved") extendAccess(db, row.user_id, billingPeriodMonths());
+    db.exec("COMMIT");
+    return true;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function assertCanSend(db: DB, userId: string) {
@@ -252,7 +264,7 @@ export function paymentRequiredMessage(status: AccountStatus) {
   const wallet = status.lightningWallet
     ? ` to ${status.lightningWallet}`
     : " to the configured Lightning wallet";
-  return `Free message limit reached (${status.freeLimit}/${status.freeLimit}). Pay ${status.paymentSatoshis.toLocaleString("en-US")} satoshis for quarterly access${wallet}, then upload the payment screenshot from Billing. Your account will be reviewed within 24 hours.`;
+  return `Free message limit reached (${status.freeLimit}/${status.freeLimit}). Open Billing to pay ${status.paymentSatoshis.toLocaleString("en-US")} satoshis for ${status.billingPeriodMonths} months of access by Lightning or on-chain; payments unlock automatically. You can also pay${wallet} and upload a screenshot for review.`;
 }
 
 function smtpConfigured() {

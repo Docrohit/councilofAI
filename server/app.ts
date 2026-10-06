@@ -69,6 +69,19 @@ import {
   sendPaymentScreenshot,
   isBillingAdmin,
 } from "./billing.ts";
+import QRCode from "qrcode";
+import { modelCatalog, resolveModelId } from "./catalog.ts";
+import {
+  adminOrders,
+  approveOrder,
+  createOrder,
+  PaymentError,
+  paymentsConfig,
+  rejectOrder,
+  submitProof,
+  userOrder,
+  userOrders,
+} from "./payments.ts";
 
 const credentials = z.object({
   email: z
@@ -612,9 +625,10 @@ export function createApp(directory: string, production = false) {
   );
   app.post("/api/admin/users/:id/approval", admin, (req, res) => {
     const { approved } = z.object({ approved: z.boolean() }).parse(req.body);
+    // Revoking also ends any paid period.
     const result = db
-      .prepare("UPDATE users SET access_approved=? WHERE id=?")
-      .run(approved ? 1 : 0, req.params.id as string);
+      .prepare("UPDATE users SET access_approved=?, access_until=CASE WHEN ? THEN access_until ELSE NULL END WHERE id=?")
+      .run(approved ? 1 : 0, approved ? 1 : 0, req.params.id as string);
     if (!result.changes) {
       res.sendStatus(404);
       return;
@@ -785,8 +799,97 @@ export function createApp(directory: string, production = false) {
     res.json({ ok: true });
   });
   app.get("/api/billing", async (_req, res) =>
-    res.json(await accountStatusWithPricing(db, userOf(res).id)),
+    res.json({
+      ...(await accountStatusWithPricing(db, userOf(res).id)),
+      payments: {
+        lightning: !!paymentsConfig().lightningAddress,
+        onchain: !!paymentsConfig().onchainAddress,
+      },
+    }),
   );
+  // Automatic payments: Lightning (zap receipts or preimage) and on-chain (unique amount or txid).
+  const paymentError = (res: Response, e: unknown) =>
+    res
+      .status(e instanceof PaymentError ? e.status : 400)
+      .json({ error: e instanceof z.ZodError ? "Invalid request." : (e as Error).message });
+  const proofLimit = rateLimit({
+    windowMs: 15 * 60_000,
+    limit: 30,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+  });
+  app.get("/api/billing/orders", (_req, res) =>
+    res.json(userOrders(db, userOf(res).id)),
+  );
+  app.post("/api/billing/orders", proofLimit, async (req, res) => {
+    try {
+      const { chain } = z
+        .object({ chain: z.enum(["lightning", "onchain"]) })
+        .parse(req.body);
+      res.status(201).json(await createOrder(db, userOf(res).id, chain));
+    } catch (e) {
+      paymentError(res, e);
+    }
+  });
+  app.get("/api/billing/orders/:id", (req, res) => {
+    try {
+      res.json(userOrder(db, userOf(res).id, req.params.id as string));
+    } catch (e) {
+      paymentError(res, e);
+    }
+  });
+  app.get("/api/billing/orders/:id/qr.svg", async (req, res) => {
+    try {
+      const order = userOrder(db, userOf(res).id, req.params.id as string);
+      const content =
+        order.chain === "lightning" && order.invoice
+          ? `LIGHTNING:${order.invoice.toUpperCase()}`
+          : order.bip21;
+      if (!content) throw new PaymentError("No payment request.", 404);
+      res
+        .type("image/svg+xml")
+        .send(await QRCode.toString(content, { type: "svg", margin: 1 }));
+    } catch (e) {
+      paymentError(res, e);
+    }
+  });
+  app.post("/api/billing/orders/:id/proof", proofLimit, async (req, res) => {
+    try {
+      const data = z
+        .object({
+          reference: z.string().trim().max(200).optional(),
+          note: z.string().trim().max(1000).optional(),
+        })
+        .parse(req.body);
+      res.json(
+        await submitProof(db, userOf(res).id, req.params.id as string, data),
+      );
+    } catch (e) {
+      paymentError(res, e);
+    }
+  });
+  app.get("/api/billing/admin/orders", (_req, res) => {
+    if (!requireBillingAdmin(res)) return;
+    res.json(adminOrders(db));
+  });
+  app.post("/api/billing/admin/orders/:id", async (req, res) => {
+    if (!requireBillingAdmin(res)) return;
+    try {
+      const data = z
+        .object({
+          action: z.enum(["approve", "reject"]),
+          note: z.string().trim().max(500).optional(),
+          force: z.boolean().optional(),
+        })
+        .parse(req.body);
+      if (data.action === "approve")
+        await approveOrder(db, req.params.id as string, data, userOf(res).email);
+      else rejectOrder(db, req.params.id as string, data.note);
+      res.json({ ok: true });
+    } catch (e) {
+      paymentError(res, e);
+    }
+  });
   app.get("/api/billing/payments", (_req, res) =>
     res.json(paymentSubmissions(db, userOf(res).id)),
   );
@@ -968,7 +1071,11 @@ export function createApp(directory: string, production = false) {
       })),
     ),
   );
-  app.post("/api/providers", (req, res) => {
+  app.get("/api/model-catalog", async (_req, res) => {
+    res.set("Cache-Control", "private, max-age=3600");
+    res.json(await modelCatalog());
+  });
+  app.post("/api/providers", async (req, res) => {
     const userId = userOf(res).id;
     if (store.providers(userId).length >= 20) {
       res.status(400).json({ error: "Connection limit reached." });
@@ -988,6 +1095,10 @@ export function createApp(directory: string, production = false) {
       return;
     }
     const { apiKey, clearKey, ...config } = data;
+    // Check the model ID against the provider's own list and use the closest real ID.
+    const requested = config.model;
+    if (data.transport === "direct" && apiKey)
+      config.model = await resolveModelId(config.kind, config.baseUrl, apiKey, config.model);
     const id = randomUUID();
     db.prepare(
       "INSERT INTO providers(id,user_id,config,secret) VALUES(?,?,?,?)",
@@ -997,9 +1108,9 @@ export function createApp(directory: string, production = false) {
       JSON.stringify({ ...config, id }),
       store.secrets.encrypt(apiKey || ""),
     );
-    res.status(201).json({ id });
+    res.status(201).json({ id, ...(config.model !== requested ? { correctedModel: config.model } : {}) });
   });
-  app.put("/api/providers/:id", (req, res) => {
+  app.put("/api/providers/:id", async (req, res) => {
     const userId = userOf(res).id;
     const existing = db
       .prepare("SELECT secret FROM providers WHERE id=? AND user_id=?")
@@ -1020,6 +1131,9 @@ export function createApp(directory: string, production = false) {
       return;
     }
     const { apiKey, clearKey, ...config } = data;
+    const requested = config.model;
+    if (data.transport === "direct" && apiKey)
+      config.model = await resolveModelId(config.kind, config.baseUrl, apiKey, config.model);
     db.prepare(
       "UPDATE providers SET config=?,secret=? WHERE id=? AND user_id=?",
     ).run(
@@ -1028,7 +1142,7 @@ export function createApp(directory: string, production = false) {
       req.params.id as string,
       userId,
     );
-    res.json({ ok: true });
+    res.json({ ok: true, ...(config.model !== requested ? { correctedModel: config.model } : {}) });
   });
   app.delete("/api/providers/:id", (req, res) => {
     db.prepare("DELETE FROM providers WHERE id=? AND user_id=?").run(

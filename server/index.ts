@@ -3,6 +3,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.ts";
+import { checkPayments, paymentsConfig } from "./payments.ts";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const production = process.argv.includes("--production");
 if (
@@ -33,10 +34,27 @@ const host = process.env.HOST || "127.0.0.1";
 const server = app.listen(port, host, () =>
   console.log(`Council is listening at http://${host}:${port}`),
 );
+// Checks open payments (Lightning receipts, on-chain confirmations) once a minute.
+let checking = false;
+const paymentTimer =
+  production && (paymentsConfig().lightningAddress || paymentsConfig().onchainAddress)
+    ? setInterval(async () => {
+        if (checking) return;
+        checking = true;
+        try {
+          await checkPayments(db);
+        } catch (e) {
+          console.error(`Payment check failed: ${(e as Error).message}`);
+        } finally {
+          checking = false;
+        }
+      }, 60_000)
+    : undefined;
 let closing = false;
 async function shutdown() {
   if (closing) return;
   closing = true;
+  if (paymentTimer) clearInterval(paymentTimer);
   for (const [id, job] of benchmarks.active) benchmarks.cancel(job.userId, id);
   for (const run of engine.active.values()) run.controller.abort();
   for (

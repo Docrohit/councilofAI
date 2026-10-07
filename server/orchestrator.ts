@@ -2148,8 +2148,9 @@ Image media tools may be available with a direct OpenAI image-capable connection
               name: peer.member.name,
               reason: message,
             });
+            // Never hand work to a peer on the connection that just failed (they would fail the same way).
             const successor = [...peers.values()]
-              .filter((p) => p !== peer && !p.unavailable)
+              .filter((p) => p !== peer && !p.unavailable && p.member.providerId !== provider.id)
               .sort((a, b) => a.inbox.length - b.inbox.length)[0];
             if (successor) {
               for (const work of knowledge.work.values())
@@ -2454,7 +2455,7 @@ Image media tools may be available with a direct OpenAI image-capable connection
           absent
             .map(
               (p) =>
-                `- ${p.member.name} became unavailable; its published findings were preserved and unfinished work was offered to an available peer.`,
+                `- ${p.member.name} became unavailable; its published findings were preserved and any unfinished work was offered to a peer on a working connection, if one remained.`,
             )
             .join("\n");
       signal.throwIfAborted();

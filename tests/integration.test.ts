@@ -2656,6 +2656,9 @@ test("every peer receives attachment text through the shared provider request", 
       auth.cookie,
     );
     const requests: any[] = [];
+    // The worker for this bridge connection is connected.
+    const me = await api("/me", undefined, auth.cookie);
+    engine.bridge.online.set(`${me.data.user.id}:${p.data.id}`, Date.now() + 3_600_000);
     engine.bridge.complete = async function* (
       _uid: any,
       _provider: any,
@@ -2714,6 +2717,9 @@ test("image attachments are passed as multimodal provider content", async () =>
       auth.cookie,
     );
     const requests: any[] = [];
+    // The worker for this bridge connection is connected.
+    const me = await api("/me", undefined, auth.cookie);
+    engine.bridge.online.set(`${me.data.user.id}:${p.data.id}`, Date.now() + 3_600_000);
     engine.bridge.complete = async function* (
       _uid: any,
       _provider: any,
@@ -3049,4 +3055,52 @@ test("unreadable keys are flagged, start failures release the session and Stop c
       200,
     );
     assert.equal(store.getRun(userId, failedId).status, "cancelled");
+  }));
+test("a team that can only reach offline bridge connections is refused with what to run", async () =>
+  harness(async ({ api, engine }: any) => {
+    const auth = await api("/auth/signup", { email: "bridge-off@example.test", password: "long-password-123" });
+    const p = await api(
+      "/providers",
+      { name: "RunPod Heretic", kind: "vllm", baseUrl: "http://127.0.0.1:8100/v1", model: "qwen38-heretic", transport: "bridge" },
+      auth.cookie,
+    );
+    const refused = await api("/runs", { prompt: "Fetch the Nifty option chain", config: cfg([p.data.id]) }, auth.cookie);
+    assert.equal(refused.status, 400);
+    assert.match(refused.data.error, /RunPod Heretic runs through the local bridge/);
+    assert.match(refused.data.error, /npm run cli -- worker --provider/);
+    // Once the worker is connected the run starts.
+    const me = await api("/me", undefined, auth.cookie);
+    engine.bridge.online.set(`${me.data.user.id}:${p.data.id}`, Date.now());
+    engine.bridge.complete = async function* () {
+      yield { text: 'Done.\n```council\n{"proposal":{"answer":"ok","rationale":"fixture"}}\n```' };
+    };
+    const started = await api("/runs", { prompt: "Fetch the Nifty option chain", config: cfg([p.data.id]) }, auth.cookie);
+    assert.equal(started.status, 201, JSON.stringify(started.data));
+    await done(api, auth.cookie, started.data.id);
+    // Resuming later with the worker stopped is refused the same way.
+    engine.bridge.online.set(`${me.data.user.id}:${p.data.id}`, Date.now() - 60_000);
+    const resumed = await api(`/runs/${started.data.id}/continue`, { prompt: "Continue" }, auth.cookie);
+    assert.equal(resumed.status, 400);
+    assert.match(resumed.data.error, /runs through the local bridge/);
+    assert.match(resumed.data.error, /--url "http:\/\/127\.0\.0\.1:8100\/v1"/);
+  }));
+test("when the only connection fails mid-run, agents do not hand work to peers on the same dead connection", async () =>
+  harness(async ({ api, engine }: any) => {
+    const auth = await api("/auth/signup", { email: "bridge-drop@example.test", password: "long-password-123" });
+    const p = await api(
+      "/providers",
+      { name: "Flaky bridge", kind: "vllm", baseUrl: "http://127.0.0.1:8100/v1", model: "m", transport: "bridge" },
+      auth.cookie,
+    );
+    const me = await api("/me", undefined, auth.cookie);
+    engine.bridge.online.set(`${me.data.user.id}:${p.data.id}`, Date.now() + 3_600_000);
+    engine.bridge.complete = async function* () {
+      throw new Error("Local bridge is offline. Start the CLI worker for this connection.");
+    };
+    const started = await api("/runs", { prompt: "Anything", config: cfg([p.data.id]) }, auth.cookie);
+    assert.equal(started.status, 201);
+    const result = await done(api, auth.cookie, started.data.id);
+    const events = JSON.stringify(result.events || result);
+    assert.match(events, /agent\.unavailable/);
+    assert.doesNotMatch(events, /Take over unfinished work/, "no cascade of handoffs between dead peers");
   }));

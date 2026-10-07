@@ -260,6 +260,34 @@ export function createApp(directory: string, production = false) {
       ? `The saved API key for ${names.join(", ")} can no longer be read. Edit ${names.length > 1 ? "those connections" : "that connection"} in Connections and paste the key again.`
       : "";
   };
+  /**
+   * A team that can only reach its models through local bridges whose worker is not
+   * connected would fail agent after agent; refuse it up front with what to run.
+   */
+  const offlineBridges = (userId: string, providers: Provider[], ids: string[]) => {
+    const selected = providers.filter((p) => ids.includes(p.id) && p.kind !== "demo");
+    const offline = selected.filter(
+      (p) =>
+        p.transport === "bridge" &&
+        Date.now() - (engine.bridge.online.get(`${userId}:${p.id}`) || 0) > 20_000,
+    );
+    if (!selected.length || offline.length < selected.length) return "";
+    const first = offline[0];
+    let url = "MODEL_URL";
+    try {
+      const u = new URL(first.baseUrl);
+      // Only a loopback URL is shown (the worker accepts nothing else); never credentials or a query.
+      if (["127.0.0.1", "localhost", "[::1]"].includes(u.hostname) && !u.username && !u.password)
+        url = `${u.protocol}//${u.host}${u.pathname}`.replace(/\/$/, "");
+    } catch {
+      /* keep the placeholder */
+    }
+    const command =
+      first.kind === "opencode"
+        ? `npm run cli -- coding-worker --provider ${first.id} --url "${url}" --directory "YOUR_PROJECT"`
+        : `npm run cli -- worker --provider ${first.id} --url "${url}"`;
+    return `${offline.map((p) => p.name).join(", ")} ${offline.length > 1 ? "run" : "runs"} through the local bridge, and the Council worker on your computer is not connected. Start it (${command}), wait a few seconds, then try again. Or add a direct connection such as an OpenAI or DeepSeek key.`;
+  };
   const appOrigin = process.env.APP_ORIGIN || "http://localhost:4310";
   const chargeMessage = (userId: string) => {
     assertCanSend(db, userId);
@@ -299,6 +327,8 @@ export function createApp(directory: string, production = false) {
       );
     const keyProblem = unreadableKeys(providers, config.providerIds);
     if (keyProblem) throw new Error(keyProblem);
+    const bridgeProblem = offlineBridges(userId, providers, config.providerIds);
+    if (bridgeProblem) throw new Error(bridgeProblem);
     const selected = providers.filter((p) => config.providerIds.includes(p.id));
     if (
       selected.some((p) => p.kind === "demo") &&
@@ -1228,6 +1258,11 @@ export function createApp(directory: string, production = false) {
       res.status(400).json({ error: benchmarkKeyProblem });
       return;
     }
+    const benchmarkBridgeProblem = offlineBridges(userId, providers, data.config.providerIds) || offlineBridges(userId, providers, [data.baselineProviderId]);
+    if (benchmarkBridgeProblem) {
+      res.status(400).json({ error: benchmarkBridgeProblem });
+      return;
+    }
     const tasks = [
       ...data.taskIds.map((id) => benchmarkSuite.find((t) => t.id === id)),
       ...data.customTasks,
@@ -1374,6 +1409,11 @@ export function createApp(directory: string, production = false) {
       res.status(400).json({ error: keyProblem });
       return;
     }
+    const bridgeProblem = offlineBridges(userId, providers, config.providerIds);
+    if (bridgeProblem) {
+      res.status(400).json({ error: bridgeProblem });
+      return;
+    }
     const selected = providers.filter((p) => config.providerIds.includes(p.id));
     if (
       selected.some((p) => p.kind === "demo") &&
@@ -1517,6 +1557,11 @@ export function createApp(directory: string, production = false) {
     );
     if (continueKeyProblem) {
       res.status(400).json({ error: continueKeyProblem });
+      return;
+    }
+    const continueBridgeProblem = offlineBridges(userOf(res).id, available, previous.config.providerIds);
+    if (continueBridgeProblem) {
+      res.status(400).json({ error: continueBridgeProblem });
       return;
     }
     const run: Run = {

@@ -46,11 +46,9 @@ test("signup, responsive workspace, one model with five peers, resolved finding 
     .getByRole("button", { name: "Configure team", exact: true })
     .first()
     .click();
-  await dialog
-    .getByRole("button", { name: "Manage connections", exact: true })
-    .click();
+  // "Add a model" in the team's model pool opens the add form directly.
+  await dialog.getByRole("button", { name: "Add a model", exact: true }).click();
   // Type part of a model name, pick it: provider, endpoint and exact ID are filled in.
-  await dialog.getByRole("button", { name: "Add connection" }).click();
   await dialog.getByRole("combobox", { name: "Find a model" }).fill("glm");
   await dialog.getByRole("listbox").getByRole("option", { name: /GLM 5\.3/ }).first().click();
   const form = dialog.locator("form.connection-form");

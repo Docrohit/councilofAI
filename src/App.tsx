@@ -310,6 +310,19 @@ function Auth({ onUser }: { onUser: (user: User) => void }) {
             OLLAMA <span>·</span> vLLM <span>·</span> OPENAI <span>·</span>{" "}
             CLAUDE <span>·</span> GLM
           </div>
+          <a
+            className="sister-app"
+            href="https://councilnetwork.nftforger.com"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span className="eyebrow">ALSO FROM COUNCIL</span>
+            <b>Council Network</b>
+            <span>
+              A social network for AI agents. Bring your agent and see how it
+              talks when no one is prompting it. Free to start →
+            </span>
+          </a>
         </div>
         <div className="auth-card">
           <div className="eyebrow">WELCOME TO COUNCIL</div>
@@ -1575,6 +1588,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [draftKey, setDraftKey] = useState(0);
   const [tab, setTab] = useState("discussion");
+  const [addingModel, setAddingModel] = useState(false);
   const [modal, setModal] = useState<
     | "connections"
     | "team"
@@ -2631,10 +2645,15 @@ export default function App() {
       </main>
       {modal === "connections" && (
         <Connections
-          close={() => setModal(null)}
+          startAdding={addingModel}
+          close={() => {
+            setAddingModel(false);
+            setModal(null);
+          }}
           providers={providers}
           refresh={() => loadProviders()}
           onTeam={() => {
+            setAddingModel(false);
             setModal("team");
           }}
         />
@@ -2651,6 +2670,10 @@ export default function App() {
           }}
           close={() => setModal(null)}
           connect={() => setModal("connections")}
+          addModel={() => {
+            setAddingModel(true);
+            setModal("connections");
+          }}
         />
       )}
       {modal === "project" && (
@@ -2855,12 +2878,16 @@ function Connections({
   providers,
   refresh,
   onTeam,
+  startAdding = false,
 }: {
   close: () => void;
   providers: Provider[];
   refresh: () => Promise<Provider[]>;
   onTeam: () => void;
+  /** Open straight on the "add a model" form. */
+  startAdding?: boolean;
 }) {
+  const addFormRef = useRef<HTMLFormElement>(null);
   const [edit, setEdit] = useState<Provider | null>(null);
   const [show, setShow] = useState(false);
   const [kind, setKind] = useState<ProviderKind>("ollama");
@@ -2968,8 +2995,38 @@ function Connections({
       setTestId("");
     }
   }
+  function startAdd() {
+    setEdit(null);
+    setKind("openai");
+    setTransport("direct");
+    setShortcutId("");
+    setPicked(null);
+    setShow(true);
+    setError("");
+  }
+  // When the add form opens (under the list), bring it into view and put focus in the model search.
+  useEffect(() => {
+    if (!show || edit) return;
+    const form = addFormRef.current;
+    form?.scrollIntoView({ behavior: "smooth", block: "start" });
+    form?.querySelector<HTMLInputElement>('input[role="combobox"]')?.focus({ preventScroll: true });
+  }, [show, edit]);
+  useEffect(() => {
+    if (startAdding) startAdd();
+  }, []);
   return (
     <Modal title="Model connections" close={close} wide>
+      {!show && (
+        <div className="add-model-top">
+          <button className="primary" onClick={startAdd}>
+            <Plus size={15} /> Add a model
+          </button>
+          <span className="field-help">
+            Type a model name like gpt, claude, glm or deepseek, pick it, and
+            paste your key.
+          </span>
+        </div>
+      )}
       <p className="modal-intro">
         Mix local models and cloud APIs. Keys are encrypted on the server and
         never returned to your browser.
@@ -3411,6 +3468,7 @@ function Connections({
           className="connection-form"
           key={edit?.id || "new"}
           onSubmit={submit}
+          ref={addFormRef}
         >
           {!edit && (
             <div className="full model-picker-row">
@@ -3639,19 +3697,8 @@ function Connections({
         </form>
       ) : (
         <div className="modal-actions">
-          <button
-            className="quiet-button bordered"
-            onClick={() => {
-              setEdit(null);
-              setKind("ollama");
-              setTransport("direct");
-              setShortcutId("");
-              setPicked(null);
-              setShow(true);
-              setError("");
-            }}
-          >
-            <Plus size={15} /> Add connection
+          <button className="quiet-button bordered" onClick={startAdd}>
+            <Plus size={15} /> Add another model
           </button>
           <button className="primary" onClick={onTeam}>
             Configure team <ArrowUpRight size={15} />
@@ -3673,6 +3720,7 @@ function TeamSettings({
   save,
   close,
   connect,
+  addModel,
 }: {
   providers: Provider[];
   config: RunConfig;
@@ -3680,6 +3728,7 @@ function TeamSettings({
   save: (config: RunConfig) => Promise<void>;
   close: () => void;
   connect: () => void;
+  addModel?: () => void;
 }) {
   const [value, setValue] = useState<RunConfig>(structuredClone(config));
   const [saving, setSaving] = useState(false);
@@ -3757,6 +3806,11 @@ function TeamSettings({
           <div className="resource-heading">
             <h3>1. Model pool</h3>
             <span>Available to every peer for delegation.</span>
+            {addModel && (
+              <button type="button" className="quiet-button bordered pool-add" onClick={addModel}>
+                <Plus size={14} /> Add a model
+              </button>
+            )}
           </div>
           {providers.map((p) => (
             <label className="pool-option" key={p.id}>

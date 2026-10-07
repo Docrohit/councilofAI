@@ -25,7 +25,8 @@ test("coding connection, real-work permission UI and tool transcript", async ({
     .click();
   const dialog = page.getByRole("dialog");
   await dialog
-    .getByRole("button", { name: "Add connection", exact: true })
+    .getByRole("button", { name: "Add a model", exact: true })
+    .first()
     .click();
   await dialog
     .getByRole("combobox", { name: "Provider", exact: true })

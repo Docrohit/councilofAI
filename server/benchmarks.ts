@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Run, RunConfig } from "../shared/types.ts";
 import { Store } from "./store.ts";
 import { Orchestrator } from "./orchestrator.ts";
-import { complete } from "./providers.ts";
+import { complete, outputLimit } from "./providers.ts";
 const smokeSuite = [
   {
     id: "arithmetic-01",
@@ -419,7 +419,16 @@ export class Benchmarks {
                 },
               ],
               maxTokens: result.config.maxOutputTokens,
-              signal: AbortSignal.any([signal, AbortSignal.timeout(240_000)]),
+              // Match the orchestrator: raised reasoning limits get more time.
+              signal: AbortSignal.any([
+                signal,
+                AbortSignal.timeout(
+                  outputLimit(baseline, result.config.maxOutputTokens) >
+                    result.config.maxOutputTokens
+                    ? 600_000
+                    : 240_000,
+                ),
+              ]),
             };
             try {
               const stream =

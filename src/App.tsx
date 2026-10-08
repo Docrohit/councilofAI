@@ -3669,6 +3669,11 @@ function Connections({
               ))}
             </select>
           </label>
+          <p className="field-help">
+            Thinking counts toward output, so high effort gets at least 32,000
+            output tokens per call, and xhigh or max at least 64,000. You pay
+            only for tokens used.
+          </p>
           {kind === "anthropic" && (
             <p className="field-help">
               Uses adaptive thinking when enabled. Leave off for models that do

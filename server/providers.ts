@@ -197,7 +197,67 @@ async function errorPayload(response: Response) {
     reader.releaseLock();
   }
 }
+/**
+ * Reasoning tokens count against the output limit, so high-effort connections
+ * get a larger per-call floor. A configured limit above the floor is kept.
+ */
+export function outputLimit(provider: Provider, requested: number) {
+  const effort = provider.reasoningEffort;
+  // Ollama ignores effort, and Anthropic only thinks when reasoning is on.
+  if (
+    provider.kind === "ollama" ||
+    (provider.kind === "anthropic" && !provider.reasoning) ||
+    smallOutputModels.has(modelKey(provider))
+  )
+    return requested;
+  const floor =
+    effort === "xhigh" || effort === "max"
+      ? 64_000
+      : effort === "high"
+        ? 32_000
+        : 0;
+  return Math.max(requested, floor);
+}
+
+// Models that rejected the raised limit; they keep the configured one for a while.
+const smallOutputModels = new Map<string, number>();
+const modelKey = (provider: Provider) => `${provider.baseUrl}|${provider.model}`;
+const forgetAfter = 6 * 60 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, at] of smallOutputModels)
+    if (now - at > forgetAfter) smallOutputModels.delete(key);
+}, 60 * 60 * 1000).unref();
+
+const outputLimitRejected = (error: unknown) =>
+  /\(HTTP (?:400|413|422)\)/.test(String((error as Error)?.message));
+
 export async function* complete(
+  provider: Provider,
+  request: CompletionRequest,
+): AsyncGenerator<Chunk> {
+  const raised = outputLimit(provider, request.maxTokens);
+  if (raised === request.maxTokens) {
+    yield* send(provider, request);
+    return;
+  }
+  let started = false;
+  try {
+    for await (const chunk of send(provider, { ...request, maxTokens: raised })) {
+      started = true;
+      yield chunk;
+    }
+  } catch (error) {
+    // Some models cap output below the floor; retry once with the configured limit.
+    if (started || !outputLimitRejected(error) || request.signal.aborted)
+      throw error;
+    yield* send(provider, request);
+    // Only remember the model once the configured limit actually worked.
+    smallOutputModels.set(modelKey(provider), Date.now());
+  }
+}
+
+async function* send(
   provider: Provider,
   request: CompletionRequest,
 ): AsyncGenerator<Chunk> {
@@ -308,7 +368,7 @@ export async function* complete(
       throw providerError(provider, part);
     if (part.type === "response.incomplete")
       throw new Error(
-        `${provider.name}: output was incomplete; raise the per-call output limit.`,
+        `${provider.name}: output was incomplete; raise the per-call output limit or lower reasoning effort.`,
       );
     const text =
       provider.kind === "ollama"
@@ -340,7 +400,7 @@ export async function* complete(
     ] as const)
       if (typeof value === "string" && value) {
         total += value.length;
-        if (total > 240_000)
+        if (total > Math.max(240_000, request.maxTokens * 6))
           throw new Error("Provider output exceeded the stream limit.");
         yield { type, text: value };
       }

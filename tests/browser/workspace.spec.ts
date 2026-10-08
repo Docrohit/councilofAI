@@ -70,6 +70,22 @@ test("signup, responsive workspace, one model with five peers, resolved finding 
   await expect(page.locator(".run-status")).toHaveText("completed", {
     timeout: 40_000,
   });
+  if (info.project.name === "mobile") {
+    // Phones scroll the whole conversation column, so the discussion is never
+    // squeezed between the goal header and the composer.
+    const column = page.locator("section.conversation");
+    await expect(page.locator(".composer textarea")).toBeInViewport();
+    const [scrollHeight, clientHeight] = await column.evaluate((e) => [
+      e.scrollHeight,
+      e.clientHeight,
+    ]);
+    expect(scrollHeight).toBeGreaterThan(clientHeight);
+    const transcript = await page.locator(".transcript").boundingBox();
+    expect(transcript!.height).toBeGreaterThan(clientHeight);
+    await column.evaluate((e) => e.scrollTo({ top: 0 }));
+    await expect(page.locator(".session-header h1")).toBeInViewport();
+    await expect(page.locator(".composer textarea")).not.toBeInViewport();
+  }
   await page.getByRole("button", { name: "Board", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Shared broadcast board" }),

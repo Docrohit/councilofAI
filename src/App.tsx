@@ -1609,6 +1609,24 @@ export default function App() {
   const bottom = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
+  // On phones the whole conversation column scrolls instead of the transcript (see styles.css).
+  const column = useRef<HTMLElement>(null);
+  const scroller = () => {
+    const el = list.current;
+    return el && getComputedStyle(el).overflowY === "visible"
+      ? column.current
+      : el;
+  };
+  const trackFollow = (el: HTMLElement) => {
+    const transcript = list.current;
+    // Measure to the end of the transcript, not past the composer below it.
+    const distance =
+      !transcript || el === transcript
+        ? el.scrollHeight - el.scrollTop - el.clientHeight
+        : transcript.getBoundingClientRect().bottom -
+          el.getBoundingClientRect().bottom;
+    follow.current = distance < 180;
+  };
   const runRef = useRef<string | null>(null);
   const [streamError, setStreamError] = useState(false);
   useEffect(() => {
@@ -1717,12 +1735,15 @@ export default function App() {
     return () => source.close();
   }, [runId]);
   useEffect(() => {
-    if (follow.current && ["discussion", "engagement"].includes(tab))
-      bottom.current?.scrollIntoView({ behavior: "instant", block: "end" });
+    if (!follow.current || !["discussion", "engagement"].includes(tab)) return;
+    const el = scroller();
+    if (el && el !== list.current) el.scrollTop = el.scrollHeight;
+    else bottom.current?.scrollIntoView({ behavior: "instant", block: "end" });
   }, [events.length, tab]);
   useEffect(() => {
     follow.current = ["discussion", "engagement"].includes(tab);
-    if (!follow.current) list.current?.scrollTo({ top: 0 });
+    if (!follow.current) scroller()?.scrollTo({ top: 0 });
+    if (!runId) column.current?.scrollTo({ top: 0 });
   }, [tab, runId]);
   const view = useMemo(() => activity(events), [events]);
   const members = useMemo(() => {
@@ -2089,7 +2110,13 @@ export default function App() {
           </div>
         </header>
         <div className="workspace">
-          <section className={`conversation ${run ? "has-run" : ""}`}>
+          <section
+            ref={column}
+            className={`conversation ${run ? "has-run" : ""}`}
+            onScroll={(e) => {
+              if (e.target === e.currentTarget) trackFollow(e.currentTarget);
+            }}
+          >
             {!run ? (
               <div className="welcome">
                 <div className="welcome-eyebrow">
@@ -2254,12 +2281,7 @@ export default function App() {
                 <div
                   className="transcript"
                   ref={list}
-                  onScroll={() => {
-                    const el = list.current;
-                    if (el)
-                      follow.current =
-                        el.scrollHeight - el.scrollTop - el.clientHeight < 180;
-                  }}
+                  onScroll={(e) => trackFollow(e.currentTarget)}
                   aria-live="off"
                 >
                   {streamError && (

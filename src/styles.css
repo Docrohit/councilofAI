@@ -3383,3 +3383,22 @@ fieldset {
 .add-model-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }
 .resource-heading .pool-add { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; width: fit-content; }
 .sister-app:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 700px) {
+  /* Phones: the conversation column scrolls as one page, so the goal header
+     scrolls away and the discussion is not squeezed above the composer. */
+  .conversation {
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+  .conversation > .transcript {
+    flex: none;
+    min-height: auto;
+    overflow: visible;
+  }
+  .composer-wrap {
+    flex-shrink: 0;
+  }
+  .chat-attachments > span.attachment-help {
+    display: none;
+  }
+}
